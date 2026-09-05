@@ -126,6 +126,11 @@ def check_automatic_sync(
 
     if enabled:
         status = "ativada"
+    elif service.returncode == 0 and not service_running:
+        status = (
+            "desativada (serviço Windows Time parado). "
+            "Execute como administrador para iniciar o serviço"
+        )
     elif service.returncode != 0 or configuration.returncode != 0:
         status = "não foi possível confirmar (consulte o comando abaixo)"
     else:
@@ -142,12 +147,11 @@ def check_automatic_sync(
 def synchronize_ntp(
     run_command: RunCommand = subprocess.run,
 ) -> dict[str, str | bool]:
-    """Solicita ao Windows uma sincronização usando o servidor configurado.
+    """Garante que o Windows Time esteja ativo antes de solicitar a sincronização.
 
-    O comando ``w32tm /resync`` não altera a configuração de peers: ele apenas
-    solicita uma nova sincronização ao Windows Time com a configuração atual.
-    O servidor público recomendado é exibido para orientar a configuração caso
-    o computador ainda não tenha um peer adequado.
+    O serviço ``w32time`` pode estar parado mesmo quando o Windows está
+    configurado para sincronização automática. Nesse caso, ``w32tm /resync``
+    falha; por isso o serviço é consultado e iniciado antes do resync.
     """
     if platform.system() != "Windows":
         return {
@@ -156,6 +160,49 @@ def synchronize_ntp(
             "message": "sincronização NTP disponível apenas no Windows",
             "server": NTP_SERVER,
         }
+
+    try:
+        service = run_command(
+            ["sc", "query", "w32time"],
+            capture_output=True,
+            text=True,
+            timeout=10,
+            check=False,
+        )
+    except (OSError, subprocess.SubprocessError) as exc:
+        return {
+            "available": True,
+            "success": False,
+            "message": f"não foi possível verificar o serviço Windows Time: {exc}",
+            "server": NTP_SERVER,
+        }
+
+    service_output = _completed_output(service).upper()
+    service_running = service.returncode == 0 and "RUNNING" in service_output
+
+    if not service_running:
+        try:
+            start_result = run_command(
+                ["net", "start", "w32time"],
+                capture_output=True,
+                text=True,
+                timeout=30,
+                check=False,
+            )
+        except (OSError, subprocess.SubprocessError):
+            start_result = None
+
+        if start_result is None or start_result.returncode != 0:
+            return {
+                "available": True,
+                "success": False,
+                "message": (
+                    "Não foi possível iniciar o serviço Windows Time. "
+                    "Execute o programa como Administrador "
+                    "(clique direito > Executar como administrador)."
+                ),
+                "server": NTP_SERVER,
+            }
 
     try:
         result = run_command(
@@ -187,7 +234,11 @@ def synchronize_ntp(
     return {
         "available": True,
         "success": False,
-        "message": f"falha ao sincronizar: {message}",
+        "message": (
+            "Falha ao sincronizar. Execute o programa como Administrador "
+            "para sincronizar o relógio. "
+            f"Detalhes: {message}"
+        ),
         "server": NTP_SERVER,
     }
 
