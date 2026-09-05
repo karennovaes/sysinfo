@@ -93,13 +93,16 @@ def _clean_directory(path: str) -> dict[str, Any]:
 
 
 def clean_temp() -> dict[str, Any]:
-    """Limpa os temporários do usuário e do sistema e retorna estatísticas."""
+    """Limpa temporários e o cache do Anota AI e retorna estatísticas."""
     user_path = os.environ.get("TEMP", "")
     system_path = r"C:\Windows\Temp"
+    appdata_path = os.environ.get("APPDATA", "")
+    anota_cache_path = os.path.join(appdata_path, "anotairesponde")
 
     result = {
         "temp_user": _empty_stats(user_path),
         "temp_system": _empty_stats(system_path),
+        "cache_anota": _empty_stats(anota_cache_path),
         "total_deletado": 0,
         "total_ignorados": 0,
         "total_liberado_mb": 0.0,
@@ -110,17 +113,20 @@ def clean_temp() -> dict[str, Any]:
 
     result["temp_user"] = _clean_directory(user_path)
     result["temp_system"] = _clean_directory(system_path)
-    result["total_deletado"] = (
-        result["temp_user"]["arquivos_deletados"]
-        + result["temp_system"]["arquivos_deletados"]
+    result["cache_anota"] = _clean_directory(anota_cache_path)
+    folders = (
+        result["temp_user"],
+        result["temp_system"],
+        result["cache_anota"],
     )
-    result["total_ignorados"] = (
-        result["temp_user"]["arquivos_ignorados"]
-        + result["temp_system"]["arquivos_ignorados"]
+    result["total_deletado"] = sum(
+        folder["arquivos_deletados"] for folder in folders
+    )
+    result["total_ignorados"] = sum(
+        folder["arquivos_ignorados"] for folder in folders
     )
     result["total_liberado_mb"] = round(
-        result["temp_user"]["espaco_liberado_mb"]
-        + result["temp_system"]["espaco_liberado_mb"],
+        sum(folder["espaco_liberado_mb"] for folder in folders),
         2,
     )
     return result
@@ -135,17 +141,23 @@ def display_temp_cleaner() -> None:
     result = clean_temp()
     user = result["temp_user"]
     system = result["temp_system"]
+    anota_cache = result["cache_anota"]
 
     print("--- LIMPEZA DE ARQUIVOS TEMPORÁRIOS ---")
     print(f"Pasta Temp do usuário: {user['caminho']}")
-    print(f"  Arquivos deletados: {user['arquivos_deletados']}")
-    print(f"  Arquivos ignorados (em uso): {user['arquivos_ignorados']}")
-    print(f"  Espaço liberado: {user['espaco_liberado_mb']:.2f} MB")
     print()
     print(f"Pasta Temp do sistema: {system['caminho']}")
-    print(f"  Arquivos deletados: {system['arquivos_deletados']}")
-    print(f"  Arquivos ignorados (em uso): {system['arquivos_ignorados']}")
-    print(f"  Espaço liberado: {system['espaco_liberado_mb']:.2f} MB")
+    print()
+    print(f"Cache do Anota AI: {anota_cache['caminho']}")
+    if os.path.isdir(anota_cache["caminho"]):
+        print(f"  Arquivos deletados: {anota_cache['arquivos_deletados']}")
+        print(
+            f"  Arquivos ignorados (em uso): "
+            f"{anota_cache['arquivos_ignorados']}"
+        )
+        print(f"  Espaço liberado: {anota_cache['espaco_liberado_mb']:.2f} MB")
+    else:
+        print("  Pasta não encontrada (não há cache para limpar)")
     print()
     print(f"Total de arquivos deletados: {result['total_deletado']}")
     print(f"Total de arquivos ignorados: {result['total_ignorados']}")

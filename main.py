@@ -70,7 +70,7 @@ def main() -> None:
     print("Coleta de informações do computador e da conexão de internet.")
 
     run_section(
-        "VERIFICAÇÃO DE COMPATIBILIDADE — ANOTA AI",
+        "VERIFICAÇÃO DE COMPATIBILIDADE",
         display_compatibility_check,
     )
     run_section(

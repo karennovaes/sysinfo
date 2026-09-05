@@ -304,7 +304,7 @@ class SystemDiagnosticsApp:
     def _check_compatibility(self) -> None:
         self._start_operation(
             "Verificar Compatibilidade",
-            [("VERIFICAÇÃO DE COMPATIBILIDADE — ANOTA AI", display_compatibility_check)],
+            [("VERIFICAÇÃO DE COMPATIBILIDADE", display_compatibility_check)],
         )
 
     def _show_system_info(self) -> None:
@@ -346,7 +346,7 @@ class SystemDiagnosticsApp:
         self._start_operation(
             "Executar Tudo",
             [
-                ("VERIFICAÇÃO DE COMPATIBILIDADE — ANOTA AI", display_compatibility_check),
+                ("VERIFICAÇÃO DE COMPATIBILIDADE", display_compatibility_check),
                 (
                     "INFORMAÇÕES DO SISTEMA",
                     lambda: display_system_info(collect_system_info()),
