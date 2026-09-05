@@ -2,8 +2,10 @@
 
 from __future__ import annotations
 
+import ctypes
 import os
 import platform
+import sys
 
 from modules.compatibility_check import display_compatibility_check
 from modules.cpu_monitor import monitor_cpu
@@ -13,6 +15,19 @@ from modules.system_info import collect_system_info, display_system_info
 
 TITLE = "=== Diagnóstico do Sistema ==="
 SEPARATOR = "-" * len(TITLE)
+
+
+def _ensure_admin():
+    """Re-inicia o programa com privilégios de administrador no Windows."""
+    if platform.system() != "Windows":
+        return
+    if ctypes.windll.shell32.IsUserAnAdmin():
+        return
+    # Solicita elevação UAC e re-inicia
+    ctypes.windll.shell32.ShellExecuteW(
+        None, "runas", sys.executable, " ".join(sys.argv), None, 1
+    )
+    sys.exit(0)
 
 
 def clear_screen() -> None:
@@ -41,6 +56,7 @@ def wait_before_exit() -> None:
 
 def main() -> None:
     """Orquestra as etapas do diagnóstico."""
+    _ensure_admin()
     clear_screen()
     print(TITLE)
     print("Coleta de informações do computador e da conexão de internet.")

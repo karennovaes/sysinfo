@@ -254,13 +254,13 @@ def display_datetime_sync() -> None:
         + ("ativo" if info["daylight_saving"] else "inativo/não aplicável")
     )
 
-    automatic = check_automatic_sync()
-    print(f"Sincronização automática: {automatic['status']}")
-    if not automatic["enabled"]:
-        print(f"Comando para ativar/configurar: {automatic['command']}")
-
     print(f"Sincronização NTP ({NTP_SERVER}): tentando...")
     result = synchronize_ntp()
     print(f"Resultado da sincronização: {result['message']}")
     if not result["success"] and result["available"]:
         print("Verifique se o serviço Windows Time está em execução e se o terminal tem permissões.")
+
+    automatic = check_automatic_sync()
+    print(f"Sincronização automática: {automatic['status']}")
+    if not automatic["enabled"]:
+        print(f"Comando para ativar/configurar: {automatic['command']}")
