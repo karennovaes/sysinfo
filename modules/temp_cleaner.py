@@ -97,7 +97,7 @@ def clean_temp() -> dict[str, Any]:
     user_path = os.environ.get("TEMP", "")
     system_path = r"C:\Windows\Temp"
     appdata_path = os.environ.get("APPDATA", "")
-    anota_cache_path = os.path.join(appdata_path, "anotairesponde")
+    anota_cache_path = os.path.join(appdata_path, "anotaairesponde")
 
     result = {
         "temp_user": _empty_stats(user_path),
