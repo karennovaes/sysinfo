@@ -1,71 +1,100 @@
-# Diagnóstico do Sistema
+# Diagnóstico do Sistema — Anota AI
 
-Aplicativo de diagnóstico do computador e da conexão de internet. O projeto possui uma interface gráfica em Tkinter, com o visual da Anota AI/iFood, e mantém a versão de terminal como fallback.
+Aplicativo para diagnóstico do computador e da conexão de internet, com interface gráfica em Tkinter e uma versão de terminal como fallback. A ferramenta reúne verificações úteis para o atendimento da Anota AI em um único lugar.
 
 ## Funcionalidades
 
-- **Verificação de compatibilidade Anota AI:** processador, RAM, armazenamento SSD e sistema operacional, com mensagens coloridas para cada requisito
-- **Informações do sistema:** processador, placa-mãe, núcleos, RAM, versão do Windows, disco, hostname e IP local
-- **Monitor de CPU:** uso da CPU em tempo real por 10 segundos com média final
-- **Data, hora e sincronização:** data, hora, fuso horário, offset UTC, horário de verão, status da sincronização automática e tentativa de sincronização NTP no Windows
-- **Teste de velocidade:** download, upload e ping
+- **Interface gráfica:** execução dos diagnósticos em uma janela responsiva, com resultados coloridos e barra de rolagem.
+- **Compatibilidade com a Anota AI:** verifica processador, memória RAM, armazenamento SSD e sistema operacional.
+- **Informações do sistema:** exibe processador, placa-mãe, núcleos, RAM, Windows, discos, hostname e IP local.
+- **Monitor de CPU:** acompanha o uso da CPU por aproximadamente 10 segundos e apresenta a média.
+- **Data, hora e NTP:** informa data, hora, fuso horário, offset UTC e estado da sincronização automática; no Windows, também tenta sincronizar pelo serviço Windows Time.
+- **Teste de velocidade:** mede ping, download e upload.
+- **Limpeza de temporários e cache:** remove arquivos temporários do usuário e do sistema e o cache local da Anota AI, ignorando arquivos em uso.
+- **Comandos de suporte:** acesso às impressoras, download do instalador universal de drivers e download do Anota AI Desktop.
+- **Versão de terminal:** permite executar os diagnósticos sem a interface gráfica.
 
-## Interface gráfica
+## Estrutura do projeto
 
-A GUI é aberta pelo arquivo `gui.py` e tem o título **Diagnóstico do Sistema — Anota AI**. Ela oferece os botões:
-
-- **Verificar Compatibilidade**
-- **Informações do Sistema**
-- **Monitor de CPU**
-- **Data, Hora e Sincronização**
-- **Teste de Velocidade**
-- **Executar Tudo**
-- **Limpar** e **Sair**
-
-Os diagnósticos são executados em uma thread separada para que a janela continue responsiva. Enquanto uma operação está em execução, os botões ficam desabilitados e o status mostra **Executando...**. Os resultados impressos pelos módulos são capturados e exibidos na área de texto com rolagem. A GUI traduz os destaques ANSI existentes para as cores de resultado positivo e negativo.
-
-A interface usa apenas Tkinter, biblioteca nativa do Python. O cabeçalho e os botões usam o vermelho `#EA1D2F`, com fundo branco, texto de resultado cinza escuro `#3F3E3E`, destaque positivo `#2E7D32` e destaque negativo `#C62828`.
-
-## Instalação
-
-```bash
-pip install -r requirements.txt
+```text
+.
+├── .github/
+│   └── workflows/
+│       └── build-exe.yml
+├── .gitignore
+├── README.md
+├── gui.py
+├── main.py
+├── modules/
+│   ├── __init__.py
+│   ├── compatibility_check.py
+│   ├── system_info.py
+│   ├── cpu_monitor.py
+│   ├── datetime_sync.py
+│   ├── speedtest.py
+│   └── temp_cleaner.py
+└── requirements.txt
 ```
 
-A primeira seção verifica se o computador atende aos requisitos mínimos do Anota AI: Intel Core i5/i7/i9 ou AMD Ryzen 5/7/9, pelo menos 8 GB de RAM (12 GB ideal), SSD de pelo menos 120 GB e Windows 10/11 de 64 bits. A identificação do tipo de armazenamento usa WMIC ou PowerShell no Windows; quando não é possível identificar o tipo, o resultado é exibido como não verificado.
+## Como rodar localmente
 
-O módulo de data e hora usa `tzlocal` para identificar o fuso horário local. No Windows, a sincronização é solicitada pelo comando `w32tm /resync`; o aplicativo não altera automaticamente a configuração do sistema além da tentativa de sincronização solicitada pela funcionalidade.
+Recomenda-se Python 3.11 ou superior compatível com as dependências do projeto. Na pasta do repositório, instale os pacotes:
 
-## Uso
+```bash
+python -m pip install -r requirements.txt
+```
 
-### Interface gráfica
+Para abrir a interface gráfica:
 
 ```bash
 python gui.py
 ```
 
-### Terminal (fallback)
+Para usar a versão de terminal:
 
 ```bash
 python main.py
 ```
 
-A função `_ensure_admin()` solicita elevação UAC no Windows antes da execução, tanto na GUI quanto no fallback de terminal.
+A verificação de compatibilidade considera como referência processadores Intel Core i5/i7/i9 ou AMD Ryzen 5/7/9, pelo menos 8 GB de RAM (12 GB ideal), SSD de pelo menos 120 GB e Windows 10/11 de 64 bits. Quando uma informação não pode ser identificada, o resultado é mostrado como não verificado.
 
-## Gerar executável (.exe)
+## Gerar o executável manualmente
 
-> **Importante:** o `.exe` deve ser gerado em uma máquina Windows, pois o PyInstaller não faz cross-compilação.
-
-Para gerar a versão gráfica como um único executável, execute na pasta do projeto:
+O PyInstaller precisa ser executado no Windows para gerar um `.exe` Windows. Com as dependências instaladas, execute:
 
 ```bash
-python -m PyInstaller --onefile --windowed gui.py
+pyinstaller --onefile --windowed gui.py
 ```
 
-A opção `--windowed` esconde a janela do console ao iniciar a aplicação gráfica. O executável estará em `dist/gui.exe`.
-
-Para gerar opcionalmente a versão de terminal:
+O arquivo será criado como `dist/gui.exe`. Para usar o mesmo nome amigável do build automático:
 
 ```bash
-python -m PyInstaller --onefile main.py
+python -m PyInstaller --onefile --windowed --name "DiagnosticoSistema-AnotaAI" gui.py
 ```
+
+Nesse caso, o arquivo será `dist/DiagnosticoSistema-AnotaAI.exe`.
+
+## GitHub Actions e Releases
+
+O workflow `.github/workflows/build-exe.yml` é executado automaticamente em:
+
+- push para `main` ou `master`;
+- pull request para `main` ou `master`;
+- execução manual pelo botão **Run workflow** na aba **Actions**.
+
+A automação usa `windows-latest` e Python 3.11, instala `requirements.txt` e compila `gui.py` como `DiagnosticoSistema-AnotaAI.exe`. O executável fica disponível como artifact da execução. Em pushes para `main` ou `master`, o workflow também cria uma Release com a tag `v< número da execução >` e anexa o `.exe` na aba **Releases**.
+
+Para publicar uma nova versão, faça commit e push na branch principal:
+
+```bash
+git add .
+git commit -m "descrição da alteração"
+git push origin main
+```
+
+Pull requests executam o build para validação, mas a Release automática só é criada quando o push ocorre diretamente em `main` ou `master`.
+
+## Observação sobre permissões (UAC)
+
+No Windows, o aplicativo solicita automaticamente elevação pelo UAC quando necessário. Confirme a janela de administrador para permitir os diagnósticos que dependem de permissões elevadas, como sincronização de horário e limpeza de pastas do sistema. Em outros sistemas operacionais, a solicitação de UAC não se aplica.
+
