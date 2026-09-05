@@ -7,6 +7,7 @@ arquivo ``main.py`` continua disponível como alternativa de terminal.
 from __future__ import annotations
 
 import io
+import os
 import sys
 
 if sys.stdout is None:
@@ -21,6 +22,7 @@ import re
 import subprocess
 import threading
 import tkinter as tk
+import urllib.request
 from contextlib import redirect_stdout
 from io import StringIO
 from collections.abc import Callable
@@ -109,6 +111,7 @@ class SystemDiagnosticsApp:
             ("Teste de Velocidade", self._speed_test),
             ("Limpar Temporários", self._clean_temporaries),
             ("Executar Tudo", self._run_all),
+            ("Comandos", self._open_commands),
         ]
         for index, (label, action) in enumerate(definitions):
             button = tk.Button(
@@ -301,10 +304,14 @@ class SystemDiagnosticsApp:
         elif self._busy:
             self.root.after(50, self._process_queue)
 
+    def _open_commands(self) -> None:
+        """Abre a janela de comandos utilitários sem incluir diagnóstico."""
+        CommandsWindow(self.root)
+
     def _check_compatibility(self) -> None:
         self._start_operation(
             "Verificar Compatibilidade",
-            [("VERIFICAÇÃO DE COMPATIBILIDADE", display_compatibility_check)],
+            [("VERIFICAÇÃO DE COMPATIBILIDADE — ANOTA AI", display_compatibility_check)],
         )
 
     def _show_system_info(self) -> None:
@@ -346,7 +353,7 @@ class SystemDiagnosticsApp:
         self._start_operation(
             "Executar Tudo",
             [
-                ("VERIFICAÇÃO DE COMPATIBILIDADE", display_compatibility_check),
+                ("VERIFICAÇÃO DE COMPATIBILIDADE — ANOTA AI", display_compatibility_check),
                 (
                     "INFORMAÇÕES DO SISTEMA",
                     lambda: display_system_info(collect_system_info()),
@@ -357,6 +364,257 @@ class SystemDiagnosticsApp:
                 ("LIMPEZA DE ARQUIVOS TEMPORÁRIOS", display_temp_cleaner),
             ],
         )
+
+
+
+class CommandsWindow:
+    """Janela secundária com comandos utilitários."""
+
+    PRINTERS_COMMAND = "shell:::{A8A91A66-3A7D-4424-8D24-04E180695C7A}"
+    DRIVER_URL = (
+        "https://raw.githubusercontent.com/Delutto/instalador_universal/main/"
+        "Output/Instalador_Universal_0.9.4.exe"
+    )
+    DRIVER_FILENAME = "Instalador_Universal_0.9.4.exe"
+    DESKTOP_URL = "https://app.anota.ai/download-app/anotaai-desktop"
+    DESKTOP_FILENAME = "anotaai-desktop.exe"
+
+    def __init__(self, parent: tk.Misc) -> None:
+        self.window = tk.Toplevel(parent)
+        self.window.title("Comandos — Anota AI")
+        self.window.geometry("500x400")
+        self.window.minsize(420, 320)
+        self.window.configure(bg=SECONDARY_COLOR)
+
+        self._buttons: list[tk.Button] = []
+        self._busy = False
+        self._result_queue: queue.Queue[tuple[str, str | None]] = queue.Queue()
+        self._build_header()
+        self._build_actions()
+        self._build_results()
+        self._build_footer()
+
+    def _build_header(self) -> None:
+        header = tk.Frame(self.window, bg=PRIMARY_COLOR, height=58)
+        header.pack(fill="x")
+        header.pack_propagate(False)
+        title = tk.Label(
+            header,
+            text="COMANDOS — ANOTA AI",
+            bg=PRIMARY_COLOR,
+            fg=SECONDARY_COLOR,
+            font=("Arial", 13, "bold"),
+            anchor="w",
+            padx=18,
+        )
+        title.pack(fill="both", expand=True)
+
+    def _build_actions(self) -> None:
+        actions = tk.Frame(self.window, bg=SECONDARY_COLOR, padx=18, pady=12)
+        actions.pack(fill="x")
+        definitions = [
+            ("Abrir Impressoras", self._open_printers),
+            ("Baixar Instalador de Drivers", self._download_driver),
+            ("Baixar Anota AI Desktop", self._download_desktop),
+        ]
+        for label, action in definitions:
+            button = tk.Button(
+                actions,
+                text=label,
+                command=action,
+                bg=PRIMARY_COLOR,
+                fg=SECONDARY_COLOR,
+                activebackground=PRIMARY_COLOR,
+                activeforeground=SECONDARY_COLOR,
+                relief="flat",
+                cursor="hand2",
+                font=("Arial", 10, "bold"),
+                padx=10,
+                pady=7,
+            )
+            button.pack(fill="x", pady=3)
+            self._buttons.append(button)
+
+    def _build_results(self) -> None:
+        results_frame = tk.Frame(self.window, bg=SECONDARY_COLOR, padx=18)
+        results_frame.pack(fill="both", expand=True)
+        results_frame.grid_rowconfigure(0, weight=1)
+        results_frame.grid_columnconfigure(0, weight=1)
+
+        self.output = tk.Text(
+            results_frame,
+            wrap="word",
+            bg=SECONDARY_COLOR,
+            fg=RESULT_TEXT_COLOR,
+            insertbackground=RESULT_TEXT_COLOR,
+            font=("Consolas", 9),
+            relief="solid",
+            borderwidth=1,
+            padx=10,
+            pady=8,
+            state="disabled",
+        )
+        scrollbar = tk.Scrollbar(
+            results_frame, orient="vertical", command=self.output.yview
+        )
+        self.output.configure(yscrollcommand=scrollbar.set)
+        self.output.grid(row=0, column=0, sticky="nsew")
+        scrollbar.grid(row=0, column=1, sticky="ns")
+
+    def _build_footer(self) -> None:
+        footer = tk.Frame(self.window, bg=SECONDARY_COLOR, padx=18, pady=10)
+        footer.pack(fill="x")
+        self.status = tk.Label(
+            footer,
+            text="Pronto",
+            bg=SECONDARY_COLOR,
+            fg=RESULT_TEXT_COLOR,
+            anchor="w",
+            font=("Arial", 9),
+        )
+        self.status.pack(side="left", fill="x", expand=True)
+        close_button = tk.Button(
+            footer,
+            text="Fechar",
+            command=self.window.destroy,
+            bg=PRIMARY_COLOR,
+            fg=SECONDARY_COLOR,
+            activebackground=PRIMARY_COLOR,
+            activeforeground=SECONDARY_COLOR,
+            relief="flat",
+            font=("Arial", 10, "bold"),
+            padx=16,
+            pady=5,
+        )
+        close_button.pack(side="right")
+
+    def _append_output(self, text: str) -> None:
+        """Adiciona uma mensagem à área de status na thread principal."""
+        self.output.configure(state="normal")
+        self.output.insert("end", text)
+        self.output.see("end")
+        self.output.configure(state="disabled")
+
+    def _set_busy(self, label: str) -> None:
+        self._busy = True
+        self.status.configure(text="Executando...", fg=PRIMARY_COLOR)
+        for button in self._buttons:
+            button.configure(state="disabled")
+        self._append_output(f"{label}\n")
+
+    def _set_ready(self) -> None:
+        self._busy = False
+        self.status.configure(text="Pronto", fg=RESULT_TEXT_COLOR)
+        for button in self._buttons:
+            button.configure(state="normal")
+
+    def _start_thread(
+        self,
+        label: str,
+        action: Callable[[], None],
+        error_prefix: str = "Erro",
+    ) -> None:
+        if self._busy:
+            return
+        self._set_busy(label)
+        worker = threading.Thread(
+            target=self._run_action,
+            args=(action, error_prefix),
+            daemon=True,
+            name="sysinfo-command",
+        )
+        worker.start()
+        self.window.after(50, self._process_queue)
+
+    def _run_action(self, action: Callable[[], None], error_prefix: str) -> None:
+        try:
+            action()
+        except Exception as exc:  # pragma: no cover - proteção da thread
+            self._result_queue.put(("output", f"{error_prefix}: {exc}\n"))
+        finally:
+            self._result_queue.put(("done", None))
+
+    def _process_queue(self) -> None:
+        finished = False
+        while True:
+            try:
+                message_type, payload = self._result_queue.get_nowait()
+            except queue.Empty:
+                break
+            if message_type == "output" and payload is not None:
+                self._append_output(payload)
+            elif message_type == "done":
+                finished = True
+        if finished:
+            self._set_ready()
+        elif self._busy:
+            self.window.after(50, self._process_queue)
+
+    @staticmethod
+    def _downloads_path() -> str:
+        """Retorna a pasta Downloads do usuário, priorizando o Windows."""
+        if platform.system() == "Windows":
+            user_profile = os.environ.get("USERPROFILE")
+            if user_profile:
+                return os.path.join(user_profile, "Downloads")
+        return os.path.join(os.path.expanduser("~"), "Downloads")
+
+    def _open_printers(self) -> None:
+        self._start_thread("Abrir Impressoras", self._open_printers_worker)
+
+    def _open_printers_worker(self) -> None:
+        if platform.system() != "Windows":
+            self._result_queue.put(("output", "Disponível apenas no Windows\n"))
+            return
+        subprocess.Popen(["explorer", self.PRINTERS_COMMAND])
+        self._result_queue.put(("output", "Abrindo pasta de Impressoras...\n"))
+
+    def _download_driver(self) -> None:
+        self._start_thread(
+            "Baixar Instalador de Drivers",
+            lambda: self._download_file(
+                self.DRIVER_URL,
+                self.DRIVER_FILENAME,
+                "Baixando Instalador de Drivers...",
+            ),
+            error_prefix="Erro ao baixar",
+        )
+
+    def _download_desktop(self) -> None:
+        self._start_thread(
+            "Baixar Anota AI Desktop",
+            lambda: self._download_file(
+                self.DESKTOP_URL,
+                self.DESKTOP_FILENAME,
+                "Baixando Anota AI Desktop...",
+            ),
+            error_prefix="Erro ao baixar",
+        )
+
+    def _download_file(self, url: str, filename: str, message: str) -> None:
+        downloads_path = self._downloads_path()
+        os.makedirs(downloads_path, exist_ok=True)
+        destination = os.path.join(downloads_path, filename)
+        self._result_queue.put(("output", f"{message}\n"))
+
+        def reporthook(block_number: int, block_size: int, total_size: int) -> None:
+            downloaded = block_number * block_size
+            if total_size > 0:
+                percent = min(100, int(downloaded * 100 / total_size))
+                total_mb = total_size / (1024 * 1024)
+                downloaded_mb = min(downloaded, total_size) / (1024 * 1024)
+                progress = (
+                    f"Baixando... {percent}% "
+                    f"({downloaded_mb:.1f} MB / {total_mb:.1f} MB)\n"
+                )
+            else:
+                progress = "Baixando...\n"
+            self._result_queue.put(("output", progress))
+
+        urllib.request.urlretrieve(url, destination, reporthook=reporthook)
+        self._result_queue.put(("output", f"Download concluído: {destination}\n"))
+        if platform.system() == "Windows":
+            subprocess.Popen(["explorer", downloads_path])
 
 
 
