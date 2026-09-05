@@ -5,9 +5,51 @@ from __future__ import annotations
 import os
 import platform
 import socket
+import subprocess
 from typing import Any
 
 import psutil
+
+
+def _processor_name() -> str:
+    """Retorna o nome amigável do processador quando disponível."""
+    name = ""
+    if platform.system() == "Windows":
+        commands = (
+            ["wmic", "cpu", "get", "name"],
+            [
+                "powershell",
+                "-NoProfile",
+                "-NonInteractive",
+                "-Command",
+                (
+                    "Get-CimInstance Win32_Processor | "
+                    "Select-Object -ExpandProperty Name"
+                ),
+            ],
+        )
+        for command in commands:
+            try:
+                result = subprocess.run(
+                    command,
+                    capture_output=True,
+                    text=True,
+                    timeout=10,
+                    check=False,
+                )
+            except (OSError, subprocess.SubprocessError):
+                continue
+            for line in (result.stdout or "").splitlines():
+                candidate = line.strip()
+                if candidate and candidate.lower() != "name":
+                    name = candidate
+                    break
+            if name:
+                break
+
+    if not name:
+        name = platform.processor() or ""
+    return name.strip() or "Não identificado"
 
 
 def _local_ip() -> str:
@@ -55,13 +97,122 @@ def _motherboard_info() -> str:
         return "Não identificado"
 
 
+def _disk_record(identifier: str, total_bytes: str | int, free_bytes: str | int) -> dict[str, Any] | None:
+    """Normaliza os dados de uma unidade lógica para GB."""
+    try:
+        total = int(str(total_bytes).strip())
+        free = int(str(free_bytes).strip())
+    except (TypeError, ValueError):
+        return None
+    if total <= 0 or free < 0:
+        return None
+
+    clean_identifier = identifier.strip().rstrip("\\/") or "Não identificado"
+    return {
+        "identificador": clean_identifier,
+        "letra": clean_identifier,
+        "total_gb": total / (1024**3),
+        "livre_gb": free / (1024**3),
+    }
+
+
+def _windows_logical_disks() -> list[dict[str, Any]]:
+    """Lista todas as unidades lógicas do Windows via WMIC ou psutil."""
+    if platform.system() != "Windows":
+        return []
+
+    try:
+        result = subprocess.run(
+            ["wmic", "logicaldisk", "get", "caption,freespace,size"],
+            capture_output=True,
+            text=True,
+            timeout=10,
+            check=False,
+        )
+    except (OSError, subprocess.SubprocessError):
+        result = None
+
+    disks: list[dict[str, Any]] = []
+    if result is not None:
+        lines = [line.strip() for line in (result.stdout or "").splitlines() if line.strip()]
+        header_index = next(
+            (
+                index
+                for index, line in enumerate(lines)
+                if {"caption", "freespace", "size"}.issubset(
+                    {column.lower() for column in line.split()}
+                )
+            ),
+            None,
+        )
+        if header_index is not None:
+            headers = [column.lower() for column in lines[header_index].split()]
+            indexes = {column: headers.index(column) for column in ("caption", "freespace", "size")}
+            for line in lines[header_index + 1 :]:
+                values = line.split()
+                if len(values) <= max(indexes.values()):
+                    continue
+                record = _disk_record(
+                    values[indexes["caption"]],
+                    values[indexes["size"]],
+                    values[indexes["freespace"]],
+                )
+                if record:
+                    disks.append(record)
+
+    if disks:
+        return disks
+
+    # WMIC was removed from newer Windows installations. psutil provides the
+    # same information without depending on that optional executable.
+    try:
+        partitions = psutil.disk_partitions(all=False)
+    except (OSError, AttributeError):
+        partitions = []
+    for partition in partitions:
+        try:
+            usage = psutil.disk_usage(partition.mountpoint)
+        except OSError:
+            continue
+        record = _disk_record(partition.device or partition.mountpoint, usage.total, usage.free)
+        if record:
+            disks.append(record)
+    return disks
+
+
+def _primary_disk_path() -> str:
+    """Retorna o caminho da unidade principal para o fallback."""
+    if platform.system() == "Windows":
+        return os.environ.get("SystemDrive", "C:") + "\\"
+    return "/"
+
+
 def collect_system_info() -> dict[str, Any]:
     """Coleta os dados usados pelo diagnóstico."""
-    disk_path = os.environ.get("SystemDrive", "C:") + "\\" if os.name == "nt" else "/"
-    disk = psutil.disk_usage(disk_path)
+    logical_disks = _windows_logical_disks()
+    if not logical_disks:
+        disk_path = _primary_disk_path()
+        try:
+            disk = psutil.disk_usage(disk_path)
+        except OSError:
+            # This fallback also keeps mocked Windows environments usable when
+            # they do not have a C:\ path available.
+            disk = psutil.disk_usage("/")
+        logical_disks = [
+            {
+                "identificador": disk_path.rstrip("\\/") or "/",
+                "letra": disk_path.rstrip("\\/") or "/",
+                "total_gb": disk.total / (1024**3),
+                "livre_gb": disk.free / (1024**3),
+            }
+        ]
+
     memory = psutil.virtual_memory()
+    primary_disk = logical_disks[0]
+    disk_total_gb = primary_disk["total_gb"]
+    disk_free_gb = primary_disk["livre_gb"]
     return {
-        "processador": platform.processor() or platform.machine() or "Não identificado",
+        "processador": _processor_name(),
         "placa_mae": _motherboard_info(),
         "nucleos_fisicos": psutil.cpu_count(logical=False) or 0,
         "nucleos_logicos": psutil.cpu_count(logical=True) or 0,
@@ -70,27 +221,36 @@ def collect_system_info() -> dict[str, Any]:
         "windows": _windows_info(),
         "hostname": socket.gethostname(),
         "ip_local": _local_ip(),
-        "disco_total_gb": disk.total / (1024**3),
-        "disco_usado_gb": disk.used / (1024**3),
-        "disco_livre_gb": disk.free / (1024**3),
+        "discos": logical_disks,
+        "disco_total_gb": disk_total_gb,
+        "disco_usado_gb": disk_total_gb - disk_free_gb,
+        "disco_livre_gb": disk_free_gb,
     }
 
 
 def display_system_info(info: dict[str, Any] | None = None) -> None:
-    """Exibe as informações do sistema em português."""
+    """Exibe somente o resumo solicitado das informações do sistema."""
     info = info or collect_system_info()
+    print("INFORMAÇÕES DO SISTEMA\n")
     print(f"Processador: {info['processador']}")
-    print(f"Placa-mãe: {info['placa_mae']}")
-    print(f"Núcleos físicos: {info['nucleos_fisicos']}")
-    print(f"Núcleos lógicos: {info['nucleos_logicos']}")
     print(f"RAM total: {info['ram_total_gb']:.2f} GB")
-    print(f"RAM disponível: {info['ram_disponivel_gb']:.2f} GB")
-    print(f"Windows/SO: {info['windows']}")
-    print(f"Nome do computador: {info['hostname']}")
-    print(f"IP local: {info['ip_local']}")
-    print(
-        "Disco: "
-        f"{info['disco_usado_gb']:.2f} GB usados de "
-        f"{info['disco_total_gb']:.2f} GB "
-        f"({info['disco_livre_gb']:.2f} GB livres)"
-    )
+    print(f"Sistema Operacional: {info['windows']}")
+    print(f"IP local: {info['ip_local']}\n")
+    print("Armazenamento:")
+
+    disks = info.get("discos") or []
+    if not disks and "disco_total_gb" in info and "disco_livre_gb" in info:
+        disks = [
+            {
+                "identificador": "Disco principal",
+                "total_gb": info["disco_total_gb"],
+                "livre_gb": info["disco_livre_gb"],
+            }
+        ]
+    for disk in disks:
+        identifier = disk.get("identificador", disk.get("letra", "Disco"))
+        separator = "" if str(identifier).endswith(":") else ":"
+        print(
+            f"  {identifier}{separator} {disk['total_gb']:.2f} GB total, "
+            f"{disk['livre_gb']:.2f} GB livres"
+        )
