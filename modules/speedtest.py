@@ -6,7 +6,7 @@ from typing import Any
 
 try:
     import speedtest as _speedtest
-except ImportError:
+except Exception:
     _speedtest = None
 
 

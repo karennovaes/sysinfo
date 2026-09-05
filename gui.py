@@ -6,12 +6,19 @@ arquivo ``main.py`` continua disponível como alternativa de terminal.
 
 from __future__ import annotations
 
+import io
+import sys
+
+if sys.stdout is None:
+    sys.stdout = io.StringIO()
+if sys.stderr is None:
+    sys.stderr = io.StringIO()
+
 import ctypes
 import platform
 import queue
 import re
 import subprocess
-import sys
 import threading
 import tkinter as tk
 from contextlib import redirect_stdout

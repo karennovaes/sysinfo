@@ -2,10 +2,17 @@
 
 from __future__ import annotations
 
+import io
+import sys
+
+if sys.stdout is None:
+    sys.stdout = io.StringIO()
+if sys.stderr is None:
+    sys.stderr = io.StringIO()
+
 import ctypes
 import os
 import platform
-import sys
 
 from modules.compatibility_check import display_compatibility_check
 from modules.cpu_monitor import monitor_cpu
