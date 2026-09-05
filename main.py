@@ -5,6 +5,7 @@ from __future__ import annotations
 import os
 import platform
 
+from modules.compatibility_check import display_compatibility_check
 from modules.cpu_monitor import monitor_cpu
 from modules.datetime_sync import display_datetime_sync
 from modules.speedtest import display_speed_test
@@ -44,6 +45,10 @@ def main() -> None:
     print(TITLE)
     print("Coleta de informações do computador e da conexão de internet.")
 
+    run_section(
+        "VERIFICAÇÃO DE COMPATIBILIDADE — ANOTA AI",
+        display_compatibility_check,
+    )
     run_section(
         "INFORMAÇÕES DO SISTEMA",
         lambda: display_system_info(collect_system_info()),
