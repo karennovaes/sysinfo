@@ -69,5 +69,3 @@ Para gerar opcionalmente a versão de terminal:
 ```bash
 python -m PyInstaller --onefile main.py
 ```
-
-

@@ -29,6 +29,7 @@ from modules.compatibility_check import display_compatibility_check
 from modules.cpu_monitor import monitor_cpu
 from modules.datetime_sync import display_datetime_sync
 from modules.speedtest import display_speed_test
+from modules.temp_cleaner import display_temp_cleaner
 from modules.system_info import collect_system_info, display_system_info
 
 # Paleta Anota AI / iFood.
@@ -106,6 +107,7 @@ class SystemDiagnosticsApp:
             ("Monitor de CPU", self._monitor_cpu),
             ("Data, Hora e Sincronização", self._show_datetime),
             ("Teste de Velocidade", self._speed_test),
+            ("Limpar Temporários", self._clean_temporaries),
             ("Executar Tudo", self._run_all),
         ]
         for index, (label, action) in enumerate(definitions):
@@ -334,6 +336,12 @@ class SystemDiagnosticsApp:
             [("TESTE DE VELOCIDADE DA INTERNET", display_speed_test)],
         )
 
+    def _clean_temporaries(self) -> None:
+        self._start_operation(
+            "Limpar Temporários",
+            [("LIMPEZA DE ARQUIVOS TEMPORÁRIOS", display_temp_cleaner)],
+        )
+
     def _run_all(self) -> None:
         self._start_operation(
             "Executar Tudo",
@@ -346,6 +354,7 @@ class SystemDiagnosticsApp:
                 ("MONITOR DE CPU", lambda: monitor_cpu(duration=10, interval=1.0)),
                 ("DATA, HORA E SINCRONIZAÇÃO", display_datetime_sync),
                 ("TESTE DE VELOCIDADE DA INTERNET", display_speed_test),
+                ("LIMPEZA DE ARQUIVOS TEMPORÁRIOS", display_temp_cleaner),
             ],
         )
 

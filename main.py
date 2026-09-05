@@ -18,6 +18,7 @@ from modules.compatibility_check import display_compatibility_check
 from modules.cpu_monitor import monitor_cpu
 from modules.datetime_sync import display_datetime_sync
 from modules.speedtest import display_speed_test
+from modules.temp_cleaner import display_temp_cleaner
 from modules.system_info import collect_system_info, display_system_info
 
 TITLE = "=== Diagnóstico do Sistema ==="
@@ -79,6 +80,7 @@ def main() -> None:
     run_section("MONITOR DE CPU", lambda: monitor_cpu(duration=10, interval=1.0))
     run_section("DATA, HORA E SINCRONIZAÇÃO", display_datetime_sync)
     run_section("TESTE DE VELOCIDADE DA INTERNET", display_speed_test)
+    run_section("LIMPEZA DE ARQUIVOS TEMPORÁRIOS", display_temp_cleaner)
     wait_before_exit()
 
 
