@@ -6,6 +6,7 @@ import os
 import platform
 
 from modules.cpu_monitor import monitor_cpu
+from modules.datetime_sync import display_datetime_sync
 from modules.speedtest import display_speed_test
 from modules.system_info import collect_system_info, display_system_info
 
@@ -48,6 +49,7 @@ def main() -> None:
         lambda: display_system_info(collect_system_info()),
     )
     run_section("MONITOR DE CPU", lambda: monitor_cpu(duration=10, interval=1.0))
+    run_section("DATA, HORA E SINCRONIZAÇÃO", display_datetime_sync)
     run_section("TESTE DE VELOCIDADE DA INTERNET", display_speed_test)
     wait_before_exit()
 
