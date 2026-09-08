@@ -244,23 +244,24 @@ def synchronize_ntp(
 
 
 def display_datetime_sync() -> None:
-    """Exibe o diagnóstico de data, hora, fuso e sincronização NTP."""
+    """Exibe um resumo compacto de data/hora e sincronização."""
     info = collect_datetime_info()
-    print(f"Data atual: {info['date']}")
-    print(f"Hora atual: {info['time']}")
-    print(f"Fuso horário: {info['timezone']} ({info['utc_offset']})")
-    print(
-        "Horário de verão: "
-        + ("ativo" if info["daylight_saving"] else "inativo/não aplicável")
-    )
-
-    print(f"Sincronização NTP ({NTP_SERVER}): tentando...")
     result = synchronize_ntp()
-    print(f"Resultado da sincronização: {result['message']}")
-    if not result["success"] and result["available"]:
-        print("Verifique se o serviço Windows Time está em execução e se o terminal tem permissões.")
-
     automatic = check_automatic_sync()
-    print(f"Sincronização automática: {automatic['status']}")
-    if not automatic["enabled"]:
-        print(f"Comando para ativar/configurar: {automatic['command']}")
+
+    # A coleta inclui segundos para uso interno; o chat precisa somente de
+    # hora e minuto.
+    current_time = str(info["time"]).split(":")
+    time_label = ":".join(current_time[:2])
+    print(
+        f"Data/Hora: {info['date']} {time_label} "
+        f"({info['timezone']}, {info['utc_offset']})"
+    )
+    if result["success"]:
+        print("NTP: sincronizado com sucesso")
+    else:
+        print("NTP: falha ao sincronizar (execute como admin)")
+    print(
+        "Sincronização automática: "
+        + ("ativada" if automatic["enabled"] else "desativada")
+    )

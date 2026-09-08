@@ -13,7 +13,7 @@ def monitor_cpu(
     interval: float = 1.0,
     sleep: Callable[[float], None] = time.sleep,
 ) -> float:
-    """Mede e exibe o uso da CPU uma vez por segundo.
+    """Mede a CPU e exibe somente a média das leituras.
 
     Args:
         duration: quantidade de leituras a realizar.
@@ -29,14 +29,11 @@ def monitor_cpu(
         raise ValueError("O intervalo não pode ser negativo.")
 
     readings: list[float] = []
-    print(f"Monitorando a CPU por aproximadamente {duration} segundos...")
-    for second in range(1, duration + 1):
-        usage = psutil.cpu_percent(interval=None)
-        readings.append(usage)
-        print(f"[{second:02d}/{duration:02d}] Uso da CPU: {usage:.1f}%")
-        if second < duration:
+    for reading_number in range(duration):
+        readings.append(psutil.cpu_percent(interval=None))
+        if reading_number < duration - 1:
             sleep(interval)
 
     average = sum(readings) / len(readings)
-    print(f"Média de uso da CPU: {average:.1f}%")
+    print(f"CPU: média de {average:.1f}% em {duration} leituras")
     return average

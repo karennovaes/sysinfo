@@ -133,9 +133,9 @@ def clean_temp() -> dict[str, Any]:
 
 
 def display_temp_cleaner() -> None:
-    """Exibe em português o resultado da limpeza dos temporários."""
+    """Exibe o total da limpeza e um resumo curto por local."""
     if platform.system() != "Windows":
-        print("Limpeza de temporários disponível apenas no Windows")
+        print("Limpeza: disponível apenas no Windows")
         return
 
     result = clean_temp()
@@ -143,22 +143,16 @@ def display_temp_cleaner() -> None:
     system = result["temp_system"]
     anota_cache = result["cache_anota"]
 
-    print("--- LIMPEZA DE ARQUIVOS TEMPORÁRIOS ---")
-    print(f"Pasta Temp do usuário: {user['caminho']}")
-    print()
-    print(f"Pasta Temp do sistema: {system['caminho']}")
-    print()
-    print(f"Cache do Anota AI: {anota_cache['caminho']}")
+    print(
+        f"Limpeza: {result['total_deletado']} arquivos removidos, "
+        f"{result['total_liberado_mb']:.1f} MB liberados"
+    )
+    summary = [
+        f"{user['arquivos_deletados']} no Temp usuário",
+        f"{system['arquivos_deletados']} no Temp sistema",
+    ]
     if os.path.isdir(anota_cache["caminho"]):
-        print(f"  Arquivos deletados: {anota_cache['arquivos_deletados']}")
-        print(
-            f"  Arquivos ignorados (em uso): "
-            f"{anota_cache['arquivos_ignorados']}"
+        summary.append(
+            f"{anota_cache['arquivos_deletados']} no cache Anota AI"
         )
-        print(f"  Espaço liberado: {anota_cache['espaco_liberado_mb']:.2f} MB")
-    else:
-        print("  Pasta não encontrada (não há cache para limpar)")
-    print()
-    print(f"Total de arquivos deletados: {result['total_deletado']}")
-    print(f"Total de arquivos ignorados: {result['total_ignorados']}")
-    print(f"Total de espaço liberado: {result['total_liberado_mb']:.2f} MB")
+    print(f"({', '.join(summary)})")

@@ -39,14 +39,16 @@ def run_speed_test() -> dict[str, float]:
 
 
 def display_speed_test() -> None:
-    """Executa e exibe os resultados do teste em português."""
-    print("Executando teste de velocidade; isso pode levar alguns segundos...")
+    """Executa e exibe o resultado em uma única linha para o chat."""
     try:
         result = run_speed_test()
     except RuntimeError as exc:
-        print(f"Teste de velocidade indisponível: {exc}")
+        print(f"Internet: teste indisponível ({exc})")
         return
 
-    print(f"Ping: {result['ping_ms']:.1f} ms")
-    print(f"Download: {result['download_mbps']:.2f} Mbps")
-    print(f"Upload: {result['upload_mbps']:.2f} Mbps")
+    ping = float(result["ping_ms"])
+    ping_label = f"{ping:.0f}" if ping.is_integer() else f"{ping:.1f}"
+    print(
+        f"Internet: {result['download_mbps']:.1f} Mbps download, "
+        f"{result['upload_mbps']:.1f} Mbps upload, {ping_label}ms ping"
+    )

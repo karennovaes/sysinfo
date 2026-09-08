@@ -424,43 +424,49 @@ def _colored(message: str, compatible: bool) -> str:
 
 
 def display_compatibility_check() -> None:
-    """Exibe os resultados da verificação com mensagens coloridas."""
-    if platform.system() == "Windows":
-        # Ativa o processamento de sequências ANSI em terminais Windows.
-        os.system("")
-
+    """Exibe um resumo compacto e sem códigos ANSI para copiar no chat."""
     results = check_compatibility()
     processor = results["processador"]
     memory = results["memoria"]
     storage = results["armazenamento"]
     operating_system = results["sistema_operacional"]
 
-    print("VERIFICAÇÃO DE COMPATIBILIDADE — ANOTA AI")
-    print()
-    print(f"Processador: {processor['nome']}")
-    print(f"  {_colored(processor['mensagem'], processor['atende'])}")
-    print()
-    print(f"Memória RAM: {memory['total_gb']:.2f} GB")
-    print(f"  {_colored(memory['mensagem'], memory['atende'])}")
-    print()
-    if "discos" in storage:
-        print("Armazenamento:")
-        for index, disk in enumerate(storage["discos"], start=1):
-            print(
-                f"  Disco {index}: {disk['tipo']}, {disk['total_gb']:.2f} GB "
-                f"({disk['nome']})"
-            )
-        print(f"  {_colored(storage['mensagem'], storage['atende'])}")
-    else:
-        print(
-            f"Armazenamento: {storage['tipo']}, "
-            f"{storage['total_gb']:.2f} GB"
-        )
-        print(f"  {_colored(storage['mensagem'], storage['atende'])}")
-    print()
-    architecture = "64 bits" if operating_system["arquitetura_64_bits"] else "32 bits"
+    def status_line(compatible: bool, message: str = "") -> str:
+        """Retorna somente o status essencial, preservando o detalhe da RAM."""
+        if compatible and message.startswith("Atende ("):
+            return message
+        return "Atende" if compatible else "Não atende"
+
+    def format_gb(value: Any) -> str:
+        """Formata GB sem casas quando o valor é inteiro."""
+        try:
+            number = float(value)
+        except (TypeError, ValueError):
+            return str(value)
+        return f"{number:.0f}" if number.is_integer() else f"{number:.2f}"
+
+    print("Compatibilidade Anota AI:")
     print(
-        "Sistema Operacional: "
-        f"{operating_system['sistema']} {operating_system['versao']} {architecture}"
+        f"{'✅' if processor['atende'] else '❌'} Processador: "
+        f"{processor['nome']} — "
+        f"{status_line(processor['atende'], processor['mensagem'])}"
     )
-    print(f"  {_colored(operating_system['mensagem'], operating_system['atende'])}")
+    print(
+        f"{'✅' if memory['atende'] else '❌'} RAM: "
+        f"{memory['total_gb']:.2f} GB — "
+        f"{status_line(memory['atende'], memory['mensagem'])}"
+    )
+    print(
+        f"{'✅' if storage['atende'] else '❌'} {storage['tipo']}: "
+        f"{format_gb(storage['total_gb'])} GB — "
+        f"{status_line(storage['atende'], storage['mensagem'])}"
+    )
+    architecture = "64 bits" if operating_system["arquitetura_64_bits"] else "32 bits"
+    os_label = (
+        f"{operating_system['sistema']} {operating_system['versao']} "
+        f"{architecture}"
+    )
+    print(
+        f"{'✅' if operating_system['atende'] else '❌'} SO: {os_label} — "
+        f"{status_line(operating_system['atende'], operating_system['mensagem'])}"
+    )

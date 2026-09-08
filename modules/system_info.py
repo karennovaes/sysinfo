@@ -229,15 +229,31 @@ def collect_system_info() -> dict[str, Any]:
 
 
 def display_system_info(info: dict[str, Any] | None = None) -> None:
-    """Exibe somente o resumo solicitado das informações do sistema."""
+    """Exibe um resumo compacto das informações do sistema."""
     info = info or collect_system_info()
-    print("INFORMAÇÕES DO SISTEMA\n")
-    print(f"Processador: {info['processador']}")
-    print(f"RAM total: {info['ram_total_gb']:.2f} GB")
-    print(f"Sistema Operacional: {info['windows']}")
-    print(f"IP local: {info['ip_local']}\n")
-    print("Armazenamento:")
 
+    def format_gb(value: Any) -> str:
+        """Formata GB sem casas quando o valor é inteiro."""
+        try:
+            number = float(value)
+        except (TypeError, ValueError):
+            return str(value)
+        return f"{number:.0f}" if number.is_integer() else f"{number:.2f}"
+
+    # ``_windows_info`` mantém a versão detalhada para outros consumidores;
+    # no relatório, somente o nome do SO e o build são relevantes.
+    operating_system_parts = [
+        part.strip()
+        for part in str(info["windows"]).split("|")
+        if "versão" not in part.lower()
+    ]
+    operating_system = " | ".join(operating_system_parts)
+
+    print("Sistema:")
+    print(f"Processador: {info['processador']}")
+    print(f"RAM: {info['ram_total_gb']:.2f} GB")
+    print(f"SO: {operating_system}")
+    print(f"IP: {info['ip_local']}")
     disks = info.get("discos") or []
     if not disks and "disco_total_gb" in info and "disco_livre_gb" in info:
         disks = [
@@ -248,9 +264,14 @@ def display_system_info(info: dict[str, Any] | None = None) -> None:
             }
         ]
     for disk in disks:
-        identifier = disk.get("identificador", disk.get("letra", "Disco"))
-        separator = "" if str(identifier).endswith(":") else ":"
+        identifier = str(disk.get("identificador", disk.get("letra", "Disco")))
+        if identifier.lower().startswith("disco "):
+            label = identifier
+        else:
+            label = f"Disco {identifier}"
+        if not label.endswith(":"):
+            label += ":"
         print(
-            f"  {identifier}{separator} {disk['total_gb']:.2f} GB total, "
-            f"{disk['livre_gb']:.2f} GB livres"
+            f"{label} {format_gb(disk['total_gb'])} GB total, "
+            f"{format_gb(disk['livre_gb'])} GB livres"
         )
