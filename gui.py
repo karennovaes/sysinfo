@@ -23,6 +23,7 @@ import subprocess
 import threading
 import tkinter as tk
 import urllib.request
+from tkinter import ttk
 from collections.abc import Callable
 from contextlib import redirect_stdout
 from io import StringIO
@@ -209,8 +210,26 @@ class SystemDiagnosticsApp:
         horizontal_pad = 24 if screen == "main" else 18
         results_frame = tk.Frame(parent, bg=SECONDARY_COLOR, padx=horizontal_pad)
         results_frame.pack(fill="both", expand=True)
-        results_frame.grid_rowconfigure(0, weight=1)
+        results_frame.grid_rowconfigure(1, weight=1)
         results_frame.grid_columnconfigure(0, weight=1)
+
+        # A área de progresso ocupa o topo do painel de resultados. Ela fica
+        # escondida até uma operação começar; assim o relatório não aparece
+        # enquanto o diagnóstico ainda está sendo executado.
+        progress_frame = tk.Frame(results_frame, bg=SECONDARY_COLOR)
+        progress_frame.grid(row=0, column=0, columnspan=2, sticky="ew", pady=(8, 4))
+        progress_frame.grid_columnconfigure(0, weight=1)
+        progress_label = tk.Label(
+            progress_frame,
+            text="",
+            bg=SECONDARY_COLOR,
+            fg=RESULT_TEXT_COLOR,
+            font=("Arial", 10, "bold"),
+        )
+        progress_label.grid(row=0, column=0, sticky="ew", pady=(0, 8))
+        progress_bar = ttk.Progressbar(progress_frame, orient="horizontal")
+        progress_bar.grid(row=1, column=0, sticky="ew", padx=50)
+        progress_frame.grid_remove()
 
         output = tk.Text(
             results_frame,
@@ -234,10 +253,17 @@ class SystemDiagnosticsApp:
             output.tag_configure("negative", foreground=NEGATIVE_COLOR)
             output.tag_configure("normal", foreground=RESULT_TEXT_COLOR)
             self.output = output
+            self.progress_frame = progress_frame
+            self.progress_label = progress_label
+            self.progress_bar = progress_bar
+            self._progress_total = 0
+            self._progress_current = 0
         else:
             self.command_output = output
-        output.grid(row=0, column=0, sticky="nsew")
-        scrollbar.grid(row=0, column=1, sticky="ns")
+        output.grid(row=1, column=0, sticky="nsew")
+        scrollbar.grid(row=1, column=1, sticky="ns")
+        if screen == "main":
+            self._output_scrollbar = scrollbar
 
     def _build_main_footer(self, parent: tk.Misc) -> None:
         footer = tk.Frame(parent, bg=SECONDARY_COLOR, padx=24, pady=12)
@@ -323,6 +349,55 @@ class SystemDiagnosticsApp:
         self.output.delete("1.0", "end")
         self.output.configure(state="disabled")
 
+    def _clear_output(self) -> None:
+        """Limpa o relatório principal sem considerar o estado de ocupação."""
+        self.output.configure(state="normal")
+        self.output.delete("1.0", "end")
+        self.output.configure(state="disabled")
+
+    def _show_progress(self, label_text: str, total: int = 0) -> None:
+        """Mostra o progresso e oculta o relatório durante uma operação."""
+        self._clear_output()
+        self.output.grid_remove()
+        self._output_scrollbar.grid_remove()
+        self._progress_total = total
+        self._progress_current = 0
+        self._active_progress_name = label_text
+        self.progress_label.configure(text=f"Executando: {label_text}...")
+        self.progress_frame.grid()
+        if total > 0:
+            self.progress_bar.stop()
+            self.progress_bar.configure(mode="determinate", maximum=total, value=0)
+        else:
+            self.progress_bar.configure(mode="indeterminate", value=0)
+            self.progress_bar.start(10)
+
+    def _hide_progress(self) -> None:
+        """Para a animação e volta a exibir o relatório principal."""
+        self.progress_bar.stop()
+        self.progress_frame.grid_remove()
+        self.output.grid(row=1, column=0, sticky="nsew")
+        self._output_scrollbar.grid(row=1, column=1, sticky="ns")
+
+    def _update_progress(self, current: int, total: int, label: str) -> None:
+        """Atualiza a etapa atual do diagnóstico geral."""
+        self.progress_bar.configure(mode="determinate", maximum=total, value=current)
+        self.progress_label.configure(
+            text=f"Executando: {label}... ({current}/{total})"
+        )
+
+    def _progress_name(self, section_title: str) -> str:
+        """Converte o título do relatório no nome amigável da etapa."""
+        names = {
+            "VERIFICAÇÃO DE COMPATIBILIDADE — ANOTA AI": "Verificando compatibilidade",
+            "INFORMAÇÕES DO SISTEMA": "Coletando informações do sistema",
+            "MONITOR DE CPU": "Monitorando CPU",
+            "DATA, HORA E SINCRONIZAÇÃO": "Sincronizando data e hora",
+            "TESTE DE VELOCIDADE DA INTERNET": "Testando velocidade",
+            "LIMPEZA DE ARQUIVOS TEMPORÁRIOS": "Limpando temporários",
+        }
+        return names.get(section_title, section_title)
+
     def _set_busy(self, label: str) -> None:
         """Bloqueia os controles principais durante um diagnóstico."""
         self._busy = True
@@ -346,6 +421,13 @@ class SystemDiagnosticsApp:
         if self._busy:
             return
         self._set_busy(label)
+        progress_name = (
+            self._progress_name(sections[0][0]) if len(sections) == 1 else label
+        )
+        self._show_progress(
+            progress_name,
+            total=len(sections) if len(sections) > 1 else 0,
+        )
         worker = threading.Thread(
             target=self._run_sections,
             args=(sections,),
@@ -358,6 +440,7 @@ class SystemDiagnosticsApp:
     def _run_sections(self, sections: list[Section]) -> None:
         """Executa as seções fora da thread principal e captura seus prints."""
         for title, action in sections:
+            self._result_queue.put(("progress", title))
             captured = StringIO()
             with redirect_stdout(captured):
                 try:
@@ -375,16 +458,52 @@ class SystemDiagnosticsApp:
     def _process_queue(self) -> None:
         """Entrega os resultados do diagnóstico à interface via ``after``."""
         finished = False
-        while True:
-            try:
-                message_type, payload = self._result_queue.get_nowait()
-            except queue.Empty:
-                break
-            if message_type == "output" and payload is not None:
-                self._append_output(payload)
-            elif message_type == "done":
-                finished = True
+        try:
+            message_type, payload = self._result_queue.get_nowait()
+        except queue.Empty:
+            message_type, payload = None, None
+
+        if message_type == "progress" and payload is not None:
+            progress_name = self._progress_name(payload)
+            self._active_progress_name = progress_name
+            if self._progress_total > 0:
+                # A etapa atual aparece no texto, mas a barra só avança
+                # quando o resultado dessa etapa chega à fila.
+                next_step = min(self._progress_current + 1, self._progress_total)
+                self.progress_bar.configure(
+                    mode="determinate",
+                    maximum=self._progress_total,
+                    value=self._progress_current,
+                )
+                self.progress_label.configure(
+                    text=(
+                        f"Executando: {progress_name}... "
+                        f"({next_step}/{self._progress_total})"
+                    )
+                )
+            else:
+                self.progress_label.configure(
+                    text=f"Executando: {progress_name}..."
+                )
+        elif message_type == "output" and payload is not None:
+            self._append_output(payload)
+            # No modo geral, o relatório é preenchido e exibido à medida
+            # que cada etapa termina, sem esperar a última seção.
+            if self._progress_total > 0:
+                self._progress_current = min(
+                    self._progress_current + 1, self._progress_total
+                )
+                self._update_progress(
+                    self._progress_current,
+                    self._progress_total,
+                    self._active_progress_name,
+                )
+                self.output.grid(row=1, column=0, sticky="nsew")
+                self._output_scrollbar.grid(row=1, column=1, sticky="ns")
+        elif message_type == "done":
+            finished = True
         if finished:
+            self._hide_progress()
             self._set_ready()
         elif self._busy:
             self.root.after(50, self._process_queue)
