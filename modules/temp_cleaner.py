@@ -7,6 +7,8 @@ import platform
 import shutil
 from typing import Any
 
+from modules.security import log_audit
+
 
 def _empty_stats(path: str) -> dict[str, Any]:
     """Cria o conjunto de estatísticas de uma pasta temporária."""
@@ -134,11 +136,16 @@ def clean_temp() -> dict[str, Any]:
 
 def display_temp_cleaner() -> None:
     """Exibe o total da limpeza e um resumo curto por local."""
+    result = clean_temp()
+    log_audit(
+        "temp_clean",
+        f"Deletados: {result['total_deletado']}, "
+        f"Liberado: {result['total_liberado_mb']:.2f} MB",
+    )
     if platform.system() != "Windows":
         print("Limpeza: disponível apenas no Windows")
         return
 
-    result = clean_temp()
     user = result["temp_user"]
     system = result["temp_system"]
     anota_cache = result["cache_anota"]

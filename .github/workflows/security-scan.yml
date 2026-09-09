@@ -1,0 +1,49 @@
+name: Security Scan
+
+on:
+  push:
+    branches: [main, master]
+  pull_request:
+    branches: [main, master]
+
+jobs:
+  security:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Install Bandit
+        run: pip install bandit
+
+      - name: Run Bandit SAST scan
+        run: bandit -r . -x .github -f json -o bandit-report.json || true
+
+      - name: Run Bandit SAST scan (text output)
+        run: bandit -r . -x .github || true
+
+      - name: Upload security report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: security-report
+          path: bandit-report.json
+
+      - name: Check for high severity issues
+        run: |
+          HIGH_ISSUES=$(python3 -c "
+          import json
+          with open('bandit-report.json') as f:
+              data = json.load(f)
+          high = [r for r in data.get('results', []) if r.get('issue_severity') == 'HIGH']
+          print(len(high))
+          ")
+          if [ "$HIGH_ISSUES" -gt 0 ]; then
+            echo "ALERTA: $HIGH_ISSUES issues de severidade ALTA encontradas"
+            exit 1
+          fi
