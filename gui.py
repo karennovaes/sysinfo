@@ -22,6 +22,7 @@ import re
 import subprocess
 import threading
 import tkinter as tk
+import tkinter.font as tkfont
 import urllib.request
 from tkinter import ttk
 from collections.abc import Callable
@@ -37,15 +38,149 @@ from modules.system_info import collect_system_info, display_system_info
 
 # Paleta Anota AI / iFood.
 PRIMARY_COLOR = "#EA1D2F"
-SECONDARY_COLOR = "#FFFFFF"
-RESULT_TEXT_COLOR = "#3F3E3E"
-POSITIVE_COLOR = "#2E7D32"
-NEGATIVE_COLOR = "#C62828"
+BG_DARK = "#1A1A2E"
+BG_DARKER = "#16213E"
+TEXT_LIGHT = "#E0E0E0"
+TEXT_WHITE = "#FFFFFF"
+ACCENT_GREEN = "#00FF94"
+HOVER_COLOR = "#C41523"
+BORDER_COLOR = PRIMARY_COLOR
+
+# Aliases mantidos para os nomes usados pela lógica de saída.
+SECONDARY_COLOR = TEXT_WHITE
+RESULT_TEXT_COLOR = TEXT_LIGHT
+POSITIVE_COLOR = ACCENT_GREEN
+NEGATIVE_COLOR = PRIMARY_COLOR
 WINDOW_TITLE = "Diagnóstico do Sistema — Anota AI"
 
 Action = Callable[[], None]
 Section = tuple[str, Action]
 ANSI_RE = re.compile(r"\x1b\[([0-9;]*)m")
+
+
+class RoundedButton(tk.Canvas):
+    """Botão leve desenhado em canvas para obter cantos realmente arredondados.
+
+    A classe expõe ``configure(state=..., text=...)`` como um ``tk.Button``
+    para que o bloqueio dos controles durante as threads continue intacto.
+    O desenho é recalculado quando o widget muda de largura, mantendo o
+    preenchimento arredondado também em layouts redimensionáveis.
+    """
+
+    def __init__(
+        self,
+        parent: tk.Misc,
+        *,
+        text: str,
+        command: Action,
+        bg: str = PRIMARY_COLOR,
+        hover_bg: str = HOVER_COLOR,
+        fg: str = TEXT_WHITE,
+        font: tuple[str, int, str],
+        padx: int = 16,
+        pady: int = 10,
+    ) -> None:
+        self._button_bg = bg
+        self._hover_bg = hover_bg
+        self._foreground = fg
+        self._font = tkfont.Font(font=font)
+        self._text = text
+        self._command = command
+        self._button_state = tk.NORMAL
+        self._radius = 12
+        self._padx = padx
+        self._height = max(42, self._font.metrics("linespace") + (pady * 2))
+
+        parent_bg = parent.cget("bg")
+        super().__init__(
+            parent,
+            height=self._height,
+            bg=parent_bg,
+            bd=0,
+            highlightthickness=0,
+            relief="flat",
+            cursor="hand2",
+        )
+        self._font.configure(weight="bold")
+        self.bind("<Configure>", self._redraw)
+        self.bind("<Enter>", self._on_enter)
+        self.bind("<Leave>", self._on_leave)
+        self.bind("<Button-1>", self._on_click)
+        self._redraw()
+
+    @staticmethod
+    def _rounded_rectangle(
+        canvas: tk.Canvas,
+        x1: int,
+        y1: int,
+        x2: int,
+        y2: int,
+        radius: int,
+        **kwargs: object,
+    ) -> None:
+        """Desenha um retângulo arredondado usando arcos e retângulos do canvas."""
+        diameter = radius * 2
+        canvas.create_arc(x1, y1, x1 + diameter, y1 + diameter, start=90, extent=90, **kwargs)
+        canvas.create_arc(x2 - diameter, y1, x2, y1 + diameter, start=0, extent=90, **kwargs)
+        canvas.create_arc(x1, y2 - diameter, x1 + diameter, y2, start=180, extent=90, **kwargs)
+        canvas.create_arc(x2 - diameter, y2 - diameter, x2, y2, start=270, extent=90, **kwargs)
+        canvas.create_rectangle(x1 + radius, y1, x2 - radius, y2, **kwargs)
+        canvas.create_rectangle(x1, y1 + radius, x2, y2 - radius, **kwargs)
+
+    def _redraw(self, _event: tk.Event | None = None) -> None:
+        self.delete("all")
+        width = max(self.winfo_width(), 80)
+        inset = 2
+        radius = min(self._radius, max(6, (self._height - inset * 2) // 2))
+        color = self._button_bg if self._button_state == tk.NORMAL else "#5B2730"
+
+        # Sombra discreta e o botão deslocado um pixel dão profundidade sem
+        # depender de efeitos nativos diferentes entre plataformas.
+        self._rounded_rectangle(
+            self, inset + 1, inset + 3, width - inset + 1, self._height + 1,
+            radius, fill="#0D0D1A", outline="",
+        )
+        self._rounded_rectangle(
+            self, inset, inset, width - inset, self._height - inset,
+            radius, fill=color, outline="",
+        )
+        self.create_text(
+            width // 2, self._height // 2, text=self._text, fill=self._foreground,
+            font=self._font, anchor="center",
+        )
+
+    def _on_enter(self, _event: tk.Event) -> None:
+        if self._button_state == tk.NORMAL:
+            self._button_bg, self._current_bg = self._hover_bg, self._button_bg
+            self._redraw()
+
+    def _on_leave(self, _event: tk.Event) -> None:
+        if self._button_state == tk.NORMAL and hasattr(self, "_current_bg"):
+            self._button_bg, self._current_bg = self._current_bg, self._button_bg
+            self._redraw()
+
+    def _on_click(self, _event: tk.Event) -> None:
+        if self._button_state == tk.NORMAL:
+            self._command()
+
+    def configure(self, cnf: dict[str, object] | None = None, **kwargs: object) -> None:
+        if cnf:
+            kwargs.update(cnf)
+        state = kwargs.pop("state", None)
+        text = kwargs.pop("text", None)
+        if state is not None:
+            self._button_state = state
+            self.configure_cursor()
+        if text is not None:
+            self._text = str(text)
+        if kwargs:
+            super().configure(**kwargs)
+        if state is not None or text is not None:
+            self._redraw()
+
+    def configure_cursor(self) -> None:
+        self.configure_cursor_value = "hand2" if self._button_state == tk.NORMAL else ""
+        super().configure(cursor=self.configure_cursor_value)
 
 
 def _ensure_admin() -> None:
@@ -79,23 +214,23 @@ class SystemDiagnosticsApp:
     def __init__(self, root: tk.Tk) -> None:
         self.root = root
         self.root.title(WINDOW_TITLE)
-        self.root.geometry("800x600")
-        self.root.minsize(640, 480)
-        self.root.configure(bg=SECONDARY_COLOR)
+        self.root.geometry("860x680")
+        self.root.minsize(700, 560)
+        self.root.configure(bg=BG_DARK)
 
         # As duas telas compartilham este container e nunca criam uma janela
         # adicional. Apenas uma delas fica empacotada por vez.
-        self.container = tk.Frame(self.root, bg=SECONDARY_COLOR)
+        self.container = tk.Frame(self.root, bg=BG_DARK)
         self.container.pack(fill="both", expand=True)
-        self.main_frame = tk.Frame(self.container, bg=SECONDARY_COLOR)
-        self.commands_frame = tk.Frame(self.container, bg=SECONDARY_COLOR)
+        self.main_frame = tk.Frame(self.container, bg=BG_DARK)
+        self.commands_frame = tk.Frame(self.container, bg=BG_DARK)
 
-        self._buttons: list[tk.Button] = []
+        self._buttons: list[RoundedButton] = []
         self._button_labels: dict[tk.Button, str] = {}
         self._result_queue: queue.Queue[tuple[str, str | None]] = queue.Queue()
         self._busy = False
 
-        self._command_buttons: list[tk.Button] = []
+        self._command_buttons: list[RoundedButton] = []
         self._command_button_labels: dict[tk.Button, str] = {}
         self._command_result_queue: queue.Queue[tuple[str, str | None]] = queue.Queue()
         self._command_busy = False
@@ -106,14 +241,14 @@ class SystemDiagnosticsApp:
 
     def _build_main_frame(self) -> None:
         """Monta a tela principal dentro de ``main_frame``."""
-        self._build_header(self.main_frame, WINDOW_TITLE.upper(), 76, 15, 24)
+        self._build_header(self.main_frame, WINDOW_TITLE.upper(), 90, 16, 24)
         self._build_actions(self.main_frame)
         self._build_results(self.main_frame, "main")
         self._build_main_footer(self.main_frame)
 
     def _build_commands_frame(self) -> None:
         """Monta a tela de comandos dentro de ``commands_frame``."""
-        self._build_header(self.commands_frame, "COMANDOS — ANOTA AI", 58, 13, 18)
+        self._build_header(self.commands_frame, "COMANDOS — ANOTA AI", 76, 16, 24)
         self._build_command_actions(self.commands_frame)
         self._build_results(self.commands_frame, "commands")
         self._build_commands_footer(self.commands_frame)
@@ -126,22 +261,38 @@ class SystemDiagnosticsApp:
         font_size: int,
         padx: int,
     ) -> None:
-        header = tk.Frame(parent, bg=PRIMARY_COLOR, height=height)
-        header.pack(fill="x")
-        header.pack_propagate(False)
-        title = tk.Label(
-            header,
-            text=title_text,
-            bg=PRIMARY_COLOR,
-            fg=SECONDARY_COLOR,
-            font=("Arial", font_size, "bold"),
-            anchor="w",
-            padx=padx,
+        """Cria um cabeçalho escuro com cápsula vermelha e linha de glow."""
+        header = tk.Canvas(
+            parent, height=height, bg=BG_DARK, bd=0, highlightthickness=0
         )
-        title.pack(fill="both", expand=True)
+        header.pack(fill="x", padx=16, pady=(14, 4))
+
+        def redraw(_event: tk.Event | None = None) -> None:
+            header.delete("all")
+            width = max(header.winfo_width(), 120)
+            header.create_arc(
+                0, 0, 28, height, start=90, extent=90, fill=PRIMARY_COLOR, outline=""
+            )
+            header.create_arc(
+                width - 28, 0, width, height, start=0, extent=90,
+                fill=PRIMARY_COLOR, outline=""
+            )
+            header.create_rectangle(14, 0, width - 14, height, fill=PRIMARY_COLOR, outline="")
+            header.create_rectangle(0, 14, width, height - 14, fill=PRIMARY_COLOR, outline="")
+            header.create_text(
+                padx + 4, height // 2 - 5, text=title_text, anchor="w",
+                fill=TEXT_WHITE, font=("Arial", font_size, "bold")
+            )
+            header.create_line(
+                padx + 4, height - 17, width - padx - 4, height - 17,
+                fill=TEXT_WHITE, width=1
+            )
+
+        header.bind("<Configure>", redraw)
+        redraw()
 
     def _build_actions(self, parent: tk.Misc) -> None:
-        actions = tk.Frame(parent, bg=SECONDARY_COLOR, padx=24, pady=20)
+        actions = tk.Frame(parent, bg=BG_DARK, padx=24, pady=20)
         actions.pack(fill="x")
         for column in range(2):
             actions.grid_columnconfigure(column, weight=1)
@@ -169,7 +320,7 @@ class SystemDiagnosticsApp:
             self._button_labels[button] = label
 
     def _build_command_actions(self, parent: tk.Misc) -> None:
-        actions = tk.Frame(parent, bg=SECONDARY_COLOR, padx=18, pady=12)
+        actions = tk.Frame(parent, bg=BG_DARK, padx=22, pady=16)
         actions.pack(fill="x")
         definitions: list[tuple[str, Action]] = [
             ("Abrir Impressoras", self._open_printers),
@@ -190,68 +341,63 @@ class SystemDiagnosticsApp:
         *,
         padx: int,
         pady: int,
-    ) -> tk.Button:
-        return tk.Button(
-            parent,
-            text=label,
-            command=action,
-            bg=PRIMARY_COLOR,
-            fg=SECONDARY_COLOR,
-            activebackground=PRIMARY_COLOR,
-            activeforeground=SECONDARY_COLOR,
-            relief="flat",
-            cursor="hand2",
-            font=("Arial", 10, "bold"),
-            padx=padx,
-            pady=pady,
+    ) -> RoundedButton:
+        return RoundedButton(
+            parent, text=label, command=action, padx=padx, pady=pady,
+            font=("Segoe UI", 10, "bold"),
         )
 
     def _build_results(self, parent: tk.Misc, screen: str) -> None:
-        horizontal_pad = 24 if screen == "main" else 18
-        results_frame = tk.Frame(parent, bg=SECONDARY_COLOR, padx=horizontal_pad)
-        results_frame.pack(fill="both", expand=True)
+        horizontal_pad = 24 if screen == "main" else 22
+        results_frame = tk.Frame(
+            parent, bg=BG_DARKER, padx=16, pady=12,
+            highlightbackground=BORDER_COLOR, highlightcolor=BORDER_COLOR,
+            highlightthickness=2,
+        )
+        results_frame.pack(fill="both", expand=True, padx=horizontal_pad, pady=(2, 8))
         results_frame.grid_rowconfigure(1, weight=1)
         results_frame.grid_columnconfigure(0, weight=1)
 
         # A área de progresso ocupa o topo do painel de resultados. Ela fica
         # escondida até uma operação começar; assim o relatório não aparece
         # enquanto o diagnóstico ainda está sendo executado.
-        progress_frame = tk.Frame(results_frame, bg=SECONDARY_COLOR)
-        progress_frame.grid(row=0, column=0, columnspan=2, sticky="ew", pady=(8, 4))
+        progress_frame = tk.Frame(results_frame, bg=BG_DARKER)
+        progress_frame.grid(row=0, column=0, columnspan=2, sticky="ew", pady=(0, 10))
         progress_frame.grid_columnconfigure(0, weight=1)
         progress_label = tk.Label(
-            progress_frame,
-            text="",
-            bg=SECONDARY_COLOR,
-            fg=RESULT_TEXT_COLOR,
-            font=("Arial", 10, "bold"),
+            progress_frame, text="", bg=BG_DARKER, fg=TEXT_LIGHT,
+            font=("Segoe UI", 10, "bold"),
         )
         progress_label.grid(row=0, column=0, sticky="ew", pady=(0, 8))
-        progress_bar = ttk.Progressbar(progress_frame, orient="horizontal")
-        progress_bar.grid(row=1, column=0, sticky="ew", padx=50)
+        progress_style = ttk.Style(self.root)
+        progress_style.configure(
+            "Futuristic.Horizontal.TProgressbar",
+            troughcolor=BG_DARK, background=PRIMARY_COLOR,
+            lightcolor=PRIMARY_COLOR, darkcolor=PRIMARY_COLOR, bordercolor=BG_DARK,
+        )
+        progress_bar = ttk.Progressbar(
+            progress_frame, orient="horizontal",
+            style="Futuristic.Horizontal.TProgressbar",
+        )
+        progress_bar.grid(row=1, column=0, sticky="ew", padx=32)
         progress_frame.grid_remove()
 
         output = tk.Text(
-            results_frame,
-            wrap="word",
-            bg=SECONDARY_COLOR,
-            fg=RESULT_TEXT_COLOR,
-            insertbackground=RESULT_TEXT_COLOR,
-            font=("Consolas", 10 if screen == "main" else 9),
-            relief="solid",
-            borderwidth=1,
-            padx=12 if screen == "main" else 10,
-            pady=10 if screen == "main" else 8,
-            state="disabled",
+            results_frame, wrap="word", bg=BG_DARKER, fg=TEXT_LIGHT,
+            insertbackground=TEXT_LIGHT, font=("Consolas", 10),
+            relief="flat", borderwidth=0, padx=16, pady=12,
+            state="disabled", selectbackground=PRIMARY_COLOR,
         )
         scrollbar = tk.Scrollbar(
-            results_frame, orient="vertical", command=output.yview
+            results_frame, orient="vertical", command=output.yview,
+            bg=BG_DARK, troughcolor=BG_DARKER, activebackground=PRIMARY_COLOR,
+            relief="flat", borderwidth=0, width=12,
         )
         output.configure(yscrollcommand=scrollbar.set)
         if screen == "main":
-            output.tag_configure("positive", foreground=POSITIVE_COLOR)
-            output.tag_configure("negative", foreground=NEGATIVE_COLOR)
-            output.tag_configure("normal", foreground=RESULT_TEXT_COLOR)
+            output.tag_configure("positive", foreground=ACCENT_GREEN)
+            output.tag_configure("negative", foreground=PRIMARY_COLOR)
+            output.tag_configure("normal", foreground=TEXT_LIGHT)
             self.output = output
             self.progress_frame = progress_frame
             self.progress_label = progress_label
@@ -261,20 +407,20 @@ class SystemDiagnosticsApp:
         else:
             self.command_output = output
         output.grid(row=1, column=0, sticky="nsew")
-        scrollbar.grid(row=1, column=1, sticky="ns")
+        scrollbar.grid(row=1, column=1, sticky="ns", padx=(8, 0))
         if screen == "main":
             self._output_scrollbar = scrollbar
 
     def _build_main_footer(self, parent: tk.Misc) -> None:
-        footer = tk.Frame(parent, bg=SECONDARY_COLOR, padx=24, pady=12)
+        footer = tk.Frame(parent, bg=BG_DARK, padx=24, pady=16)
         footer.pack(fill="x")
         self.status = tk.Label(
             footer,
             text="Pronto",
-            bg=SECONDARY_COLOR,
-            fg=RESULT_TEXT_COLOR,
+            bg=BG_DARK,
+            fg=ACCENT_GREEN,
             anchor="w",
-            font=("Arial", 9),
+            font=("Segoe UI", 9),
         )
         self.status.pack(side="left", fill="x", expand=True)
 
@@ -291,15 +437,15 @@ class SystemDiagnosticsApp:
         self._button_labels[exit_button] = "Sair"
 
     def _build_commands_footer(self, parent: tk.Misc) -> None:
-        footer = tk.Frame(parent, bg=SECONDARY_COLOR, padx=18, pady=10)
+        footer = tk.Frame(parent, bg=BG_DARK, padx=22, pady=16)
         footer.pack(fill="x")
         self.command_status = tk.Label(
             footer,
             text="Pronto",
-            bg=SECONDARY_COLOR,
-            fg=RESULT_TEXT_COLOR,
+            bg=BG_DARK,
+            fg=ACCENT_GREEN,
             anchor="w",
-            font=("Arial", 9),
+            font=("Segoe UI", 9),
         )
         self.command_status.pack(side="left", fill="x", expand=True)
 
@@ -412,7 +558,7 @@ class SystemDiagnosticsApp:
     def _set_ready(self) -> None:
         """Libera os controles principais após o diagnóstico."""
         self._busy = False
-        self.status.configure(text="Pronto", fg=RESULT_TEXT_COLOR)
+        self.status.configure(text="Pronto", fg=ACCENT_GREEN)
         for button in self._buttons:
             button.configure(state="normal", text=self._button_labels[button])
 
@@ -598,7 +744,7 @@ class SystemDiagnosticsApp:
 
     def _set_command_ready(self) -> None:
         self._command_busy = False
-        self.command_status.configure(text="Pronto", fg=RESULT_TEXT_COLOR)
+        self.command_status.configure(text="Pronto", fg=ACCENT_GREEN)
         for button in self._command_buttons:
             button.configure(
                 state="normal", text=self._command_button_labels[button]
