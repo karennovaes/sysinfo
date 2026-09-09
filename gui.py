@@ -15,12 +15,16 @@ import re
 import subprocess
 import sys
 import threading
-import tkinter as tk
+try:
+    import tkinter as tk
+    from tkinter import ttk
+except ImportError:  # Permite usar as rotinas não gráficas em ambientes sem Tk.
+    tk = None
+    ttk = None
 import urllib.request
 from collections.abc import Callable
 from contextlib import redirect_stdout
 from io import StringIO
-from tkinter import ttk
 
 if sys.stdout is None:
     sys.stdout = io.StringIO()
@@ -33,6 +37,7 @@ from modules.datetime_sync import display_datetime_sync
 from modules.speedtest import display_speed_test
 from modules.temp_cleaner import display_temp_cleaner
 from modules.system_info import collect_system_info, display_system_info
+from modules.security import calculate_sha256, log_audit, validate_url
 
 # Paleta Anota AI.
 PRIMARY_COLOR = "#EA1D2F"
@@ -680,6 +685,7 @@ class SystemDiagnosticsApp:
         return os.path.join(os.path.expanduser("~"), "Downloads")
 
     def _open_printers(self) -> None:
+        log_audit("open_printers", "Abrindo pasta de impressoras do Windows")
         self._start_command_thread("Abrir Impressoras", self._open_printers_worker)
 
     def _open_printers_worker(self) -> None:
@@ -714,9 +720,23 @@ class SystemDiagnosticsApp:
         )
 
     def _download_file(self, url: str, filename: str, message: str) -> None:
+        """Baixa um arquivo somente de uma origem HTTPS confiável e registra o hash."""
+        if not validate_url(url):
+            self._command_result_queue.put(
+                ("output", "Erro: URL inválida ou não confiável\n")
+            )
+            log_audit("download_failed", f"URL rejeitada: {url}")
+            return
+
         downloads_path = self._downloads_path()
-        os.makedirs(downloads_path, exist_ok=True)
         destination = os.path.join(downloads_path, filename)
+        log_audit("download_start", f"Baixando de {url} para {destination}")
+        try:
+            os.makedirs(downloads_path, exist_ok=True)
+        except OSError as error:
+            log_audit("download_failed", f"Erro: {error}")
+            self._command_result_queue.put(("output", f"Erro ao baixar: {error}\n"))
+            return
         self._command_result_queue.put(("output", f"{message}\n"))
 
         def reporthook(block_number: int, block_size: int, total_size: int) -> None:
@@ -733,7 +753,15 @@ class SystemDiagnosticsApp:
                 progress = "Baixando...\n"
             self._command_result_queue.put(("output", progress))
 
-        urllib.request.urlretrieve(url, destination, reporthook=reporthook)
+        try:
+            urllib.request.urlretrieve(url, destination, reporthook=reporthook)
+            sha256 = calculate_sha256(destination)
+        except Exception as error:
+            log_audit("download_failed", f"Erro: {error}")
+            self._command_result_queue.put(("output", f"Erro ao baixar: {error}\n"))
+            return
+
+        log_audit("download_complete", f"Arquivo: {destination}, SHA-256: {sha256}")
         self._command_result_queue.put(
             ("output", f"Download concluído: {destination}\n")
         )
@@ -1624,9 +1652,19 @@ def _set_window_icon(root: tk.Tk) -> None:
         pass
 
 
-if __name__ == "__main__":
+def main() -> None:
+    """Inicia a interface gráfica e registra o ciclo de vida do programa."""
     _ensure_admin()
+    log_audit("program_start", "Diagnóstico do Sistema iniciado")
     root = tk.Tk()
     _set_window_icon(root)
-    app = SystemDiagnosticsApp(root)
+    root.protocol(
+        "WM_DELETE_WINDOW",
+        lambda: (log_audit("program_end", "Programa encerrado"), root.destroy()),
+    )
+    SystemDiagnosticsApp(root)
     root.mainloop()
+
+
+if __name__ == "__main__":
+    main()
