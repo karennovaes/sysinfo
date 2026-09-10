@@ -23,7 +23,6 @@ except ImportError:  # Permite usar as rotinas não gráficas em ambientes sem T
     ttk = None
 
 # Permite importar as rotinas em ambientes sem Tk/display.
-_FrameBase = tk.Frame if tk is not None else object
 import urllib.request
 from collections.abc import Callable
 from contextlib import redirect_stdout
@@ -46,185 +45,6 @@ from modules.theme import *
 Action = Callable[[], None]
 Section = tuple[str, Action]
 ANSI_RE = re.compile(r"\x1b\[([0-9;]*)m")
-
-
-
-def _rounded_shape(
-    canvas: tk.Canvas,
-    width: int,
-    height: int,
-    radius: int,
-    fill: str,
-) -> None:
-    """Desenha um botão com cantos arredondados usando primitivas do Canvas."""
-    canvas.delete("rounded-shape")
-    if width <= 0 or height <= 0:
-        return
-    radius = max(1, min(radius, width // 2, height // 2))
-    diameter = radius * 2
-    arc_options = {
-        "style": "pieslice",
-        "fill": fill,
-        "outline": fill,
-        "tags": "rounded-shape",
-    }
-    canvas.create_arc(0, 0, diameter, diameter, start=0, extent=90, **arc_options)
-    canvas.create_arc(
-        width - diameter, 0, width, diameter, start=90, extent=90, **arc_options
-    )
-    canvas.create_arc(
-        width - diameter, height - diameter, width, height,
-        start=180, extent=90, **arc_options
-    )
-    canvas.create_arc(
-        0, height - diameter, diameter, height,
-        start=270, extent=90, **arc_options
-    )
-    canvas.create_rectangle(
-        radius, 0, width - radius, height,
-        fill=fill, outline=fill, tags="rounded-shape"
-    )
-    canvas.create_rectangle(
-        0, radius, width, height - radius,
-        fill=fill, outline=fill, tags="rounded-shape"
-    )
-
-
-class RoundedButton(_FrameBase):
-    """Botão com Canvas interno, hover e estado disabled.
-
-    O ``Frame`` é o widget que participa do ``pack(fill="x")``. O Canvas
-    ocupa todo o Frame com ``place`` e, assim, acompanha automaticamente a
-    largura disponível do sidebar.
-    """
-
-    def __init__(
-        self,
-        parent: tk.Misc,
-        text: str,
-        command: Action | None = None,
-        *,
-        width: int = 180,
-        height: int = 40,
-        radius: int = 12,
-        **kwargs: object,
-    ) -> None:
-        if tk is None:
-            raise RuntimeError("Tk não está disponível neste ambiente")
-        self._text = text
-        self._command = command
-        self._radius = radius
-        self._disabled = False
-        self._hovered = False
-        self._pressed = False
-        self._font = kwargs.pop("font", FONT_BUTTON)
-        background = kwargs.pop("bg", BG_LIGHT)
-        cursor = kwargs.pop("cursor", "hand2")
-
-        super().__init__(
-            parent,
-            width=width,
-            height=height,
-            bg=background,
-            highlightthickness=0,
-            bd=0,
-            relief="flat",
-            cursor=cursor,
-            **kwargs,
-        )
-        self.canvas = tk.Canvas(
-            self,
-            bg=background,
-            highlightthickness=0,
-            bd=0,
-            relief="flat",
-            cursor=cursor,
-        )
-        self.canvas.place(x=0, y=0, relwidth=1, relheight=1)
-        self.canvas.bind("<Configure>", self._on_resize)
-        self.canvas.bind("<Enter>", self._on_enter)
-        self.canvas.bind("<Leave>", self._on_leave)
-        self.canvas.bind("<Button-1>", self._on_press)
-        self.canvas.bind("<ButtonRelease-1>", self._on_release)
-        self._draw()
-
-    def _draw(self) -> None:
-        width = self.canvas.winfo_width()
-        if width <= 1:
-            width = int(self.cget("width"))
-        width = max(1, width)
-
-        height = self.canvas.winfo_height()
-        if height <= 1:
-            height = int(self.cget("height"))
-        height = max(1, height)
-        if self._disabled:
-            fill = BG_LIGHT
-            foreground = "#A8A8A8"
-        elif self._hovered or self._pressed:
-            fill = HOVER_COLOR
-            foreground = TEXT_WHITE
-        else:
-            fill = PRIMARY_COLOR
-            foreground = TEXT_WHITE
-        _rounded_shape(self.canvas, width, height, self._radius, fill)
-        self.canvas.delete("button-label")
-        self.canvas.create_text(
-            width // 2,
-            height // 2,
-            text=self._text,
-            fill=foreground,
-            font=self._font,
-            tags="button-label",
-            anchor="center",
-        )
-
-    def _on_resize(self, _event: tk.Event) -> None:
-        self._draw()
-
-    def _on_enter(self, _event: tk.Event) -> None:
-        if not self._disabled:
-            self._hovered = True
-            self._draw()
-
-    def _on_leave(self, _event: tk.Event) -> None:
-        self._hovered = False
-        self._pressed = False
-        self._draw()
-
-    def _on_press(self, _event: tk.Event) -> None:
-        if not self._disabled:
-            self._pressed = True
-            self._draw()
-
-    def _on_release(self, _event: tk.Event) -> None:
-        was_pressed = self._pressed
-        self._pressed = False
-        self._draw()
-        if was_pressed and self._hovered and not self._disabled and self._command:
-            self._command()
-
-    def configure(self, cnf: dict[str, object] | None = None, **kwargs: object):
-        """Mantém a API de estado/texto usada pela lógica da aplicação."""
-        options: dict[str, object] = {}
-        if cnf:
-            options.update(cnf)
-        options.update(kwargs)
-        if "text" in options:
-            self._text = str(options.pop("text"))
-        if "command" in options:
-            self._command = options.pop("command")  # type: ignore[assignment]
-        if "state" in options:
-            state = str(options.pop("state"))
-            self._disabled = state == "disabled"
-            if self._disabled:
-                self._hovered = False
-                self._pressed = False
-        result = super().configure(**options)
-        self._draw()
-        return result
-
-    config = configure
 
 
 def _creation_flags() -> int:
@@ -348,8 +168,8 @@ class SystemDiagnosticsApp:
             self.commands_frame,
         )
 
-        self._buttons: dict[str, list[ttk.Button | RoundedButton]] = {}
-        self._button_labels: dict[ttk.Button | RoundedButton, str] = {}
+        self._buttons: dict[str, list[ttk.Button]] = {}
+        self._button_labels: dict[ttk.Button, str] = {}
         self._outputs: dict[str, tk.Text] = {}
         self._statuses: dict[str, tk.Label] = {}
         self._result_queue: queue.Queue[tuple[str, str | None]] = queue.Queue()
@@ -379,7 +199,7 @@ class SystemDiagnosticsApp:
             font=FONT_BUTTON,
             borderwidth=0,
             focusthickness=0,
-            padding=(12, 8),
+            padding=(12, 10),
             relief="flat",
         )
         style.map(
@@ -524,7 +344,7 @@ class SystemDiagnosticsApp:
             pady=PADY_SIDEBAR,
         )
         actions.pack(fill="both", expand=True)
-        buttons: list[RoundedButton] = []
+        buttons: list[ttk.Button] = []
         for label, action in definitions:
             button = self._make_button(actions, label, action)
             button.pack(fill="x", pady=3)
@@ -565,8 +385,8 @@ class SystemDiagnosticsApp:
         label: str,
         action: Action,
         style_name: str = "Rounded.TButton",
-    ) -> ttk.Button | RoundedButton:
-        """Mantém os cards iniciais em ttk e usa Canvas nas abas internas."""
+    ) -> ttk.Button:
+        """Cria botões ttk, preservando o estilo especial dos cards iniciais."""
         if style_name == "Card.TButton":
             return ttk.Button(
                 parent,
@@ -576,14 +396,11 @@ class SystemDiagnosticsApp:
                 style=style_name,
                 cursor="hand2",
             )
-        return RoundedButton(
+        return ttk.Button(
             parent,
             text=label,
             command=action,
-            width=180,
-            height=40,
-            radius=12,
-            bg=BG_LIGHT,
+            style="Rounded.TButton",
             cursor="hand2",
         )
 
