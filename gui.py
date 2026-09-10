@@ -530,10 +530,10 @@ class SystemDiagnosticsApp:
             font=("Segoe UI", 16, "bold"),
         ).pack(pady=(0, 24))
         definitions = [
-            ("🔧  Ferramentas", lambda: self._show_frame(self.tools_frame)),
-            ("🖨️  Impressora", lambda: self._show_frame(self.printer_frame)),
-            ("📁  Arquivos Úteis", lambda: self._show_frame(self.files_frame)),
-            ("⚡  Outros Comandos", lambda: self._show_frame(self.commands_frame)),
+            ("Ferramentas", lambda: self._show_frame(self.tools_frame)),
+            ("Impressora", lambda: self._show_frame(self.printer_frame)),
+            ("Arquivos Úteis", lambda: self._show_frame(self.files_frame)),
+            ("Outros Comandos", lambda: self._show_frame(self.commands_frame)),
         ]
         for label, action in definitions:
             shadow = tk.Frame(content, bg=SHADOW_COLOR)
