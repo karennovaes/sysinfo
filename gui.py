@@ -100,7 +100,7 @@ class RoundedButton(_CanvasBase):
         command: Action | None = None,
         *,
         width: int = 180,
-        height: int = 36,
+        height: int = 40,
         radius: int = 12,
         **kwargs: object,
     ) -> None:
@@ -132,12 +132,23 @@ class RoundedButton(_CanvasBase):
         self._draw()
 
     def _draw(self) -> None:
-        width = max(1, self.winfo_width())
-        height = max(1, self.winfo_height())
+        # Antes do primeiro evento ``<Configure>``, o Canvas pode informar
+        # largura 1. Nesse momento, aproveitamos a largura já calculada do
+        # container; depois do layout, ``winfo_width`` passa a ser a fonte de
+        # verdade e permite que o botão acompanhe o ``pack(fill="x")``.
+        width = self.winfo_width()
         if width <= 1:
-            width = int(self.cget("width"))
+            parent_width = self.master.winfo_width()
+            if parent_width > 1:
+                width = parent_width
+            else:
+                width = int(self.cget("width"))
+        width = max(1, width)
+
+        height = self.winfo_height()
         if height <= 1:
             height = int(self.cget("height"))
+        height = max(1, height)
         if self._disabled:
             fill = BG_LIGHT
             foreground = "#A8A8A8"
@@ -561,7 +572,7 @@ class SystemDiagnosticsApp:
             text=label,
             command=action,
             width=180,
-            height=36,
+            height=40,
             radius=12,
             bg=BG_LIGHT,
             cursor="hand2",
