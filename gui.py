@@ -21,6 +21,8 @@ try:
 except ImportError:  # Permite usar as rotinas não gráficas em ambientes sem Tk.
     tk = None
     ttk = None
+
+# Permite importar as rotinas em ambientes sem Tk/display.
 import urllib.request
 from collections.abc import Callable
 from contextlib import redirect_stdout
@@ -38,27 +40,19 @@ from modules.speedtest import display_speed_test
 from modules.temp_cleaner import display_temp_cleaner
 from modules.system_info import collect_system_info, display_system_info
 from modules.security import calculate_sha256, log_audit, validate_url
-
-# Paleta Anota AI.
-PRIMARY_COLOR = "#EA1D2F"
-BG_WHITE = "#FFFFFF"
-BG_LIGHT = "#F5F5F5"
-TEXT_DARK = "#3F3E3E"
-TEXT_WHITE = "#FFFFFF"
-ACCENT_GREEN = "#2E7D32"
-HOVER_COLOR = "#C41523"
-BORDER_COLOR = "#E0E0E0"
-
-# Aliases usados pela saída da aplicação.
-SECONDARY_COLOR = TEXT_WHITE
-RESULT_TEXT_COLOR = TEXT_DARK
-POSITIVE_COLOR = ACCENT_GREEN
-NEGATIVE_COLOR = PRIMARY_COLOR
-WINDOW_TITLE = "Diagnóstico do Sistema — Anota AI"
+from modules.theme import *
 
 Action = Callable[[], None]
 Section = tuple[str, Action]
 ANSI_RE = re.compile(r"\x1b\[([0-9;]*)m")
+
+
+def _creation_flags() -> int:
+    """Retorna flags que impedem uma janela de console no Windows."""
+    creationflags = 0
+    if platform.system() == "Windows":
+        creationflags = subprocess.CREATE_NO_WINDOW
+    return creationflags
 
 
 def _ensure_admin() -> None:
@@ -75,8 +69,67 @@ def _ensure_admin() -> None:
     sys.exit(0)
 
 
+
+def _run_command_capture(command: list[str]) -> str:
+    """Executa um comando e retorna stdout+stderr como string."""
+    try:
+        result = subprocess.run(
+            command,
+            capture_output=True,
+            text=True,
+            timeout=30,
+            check=False,
+            creationflags=_creation_flags(),
+        )
+        output = (result.stdout or "") + (result.stderr or "")
+        return output.strip() or "Comando executado sem saída."
+    except Exception as exc:
+        return f"Erro ao executar: {exc}"
+
+
+def _clear_print_queue() -> str:
+    """Para o spooler, limpa a fila e reinicia."""
+    commands = [
+        ["net", "stop", "spooler"],
+        ["del", "/Q", "/F", "/S", r"%systemroot%\System32\Spool\Printers\*.*"],
+        ["net", "start", "spooler"],
+    ]
+    output_lines: list[str] = []
+    for command in commands:
+        # ``del`` é um comando interno do CMD; shell=True é usado somente
+        # nesta rotina, como exige o próprio Windows para esse comando.
+        command_text = " ".join(command)
+        try:
+            if command[0].casefold() == "del":
+                # ``del`` é interno ao CMD e exige shell=True.
+                result = subprocess.run(
+                    command_text,
+                    capture_output=True,
+                    text=True,
+                    timeout=15,
+                    check=False,
+                    shell=True,
+                    creationflags=_creation_flags(),
+                )
+            else:
+                result = subprocess.run(
+                    command,
+                    capture_output=True,
+                    text=True,
+                    timeout=15,
+                    check=False,
+                    creationflags=_creation_flags(),
+                )
+            output_lines.append(f"> {' '.join(command)}")
+            output_lines.append((result.stdout or result.stderr or "OK").strip())
+        except Exception as exc:
+            output_lines.append(f"> {' '.join(command)}")
+            output_lines.append(f"Erro ao executar: {exc}")
+    return "\n".join(output_lines)
+
+
 class SystemDiagnosticsApp:
-    """Janela principal com telas internas de diagnóstico e comandos."""
+    """Janela principal com menu inicial e quatro telas de comandos."""
 
     PRINTERS_COMMAND = "shell:::{A8A91A66-3A7D-4424-8D24-04E180695C7A}"
     DRIVER_URL = (
@@ -86,6 +139,10 @@ class SystemDiagnosticsApp:
     DRIVER_FILENAME = "Instalador_Universal_0.9.4.exe"
     DESKTOP_URL = "https://app.anota.ai/download-app/anotaai-desktop"
     DESKTOP_FILENAME = "anotaai-desktop.exe"
+    NETSTATGUI_URL = (
+        "https://raw.githubusercontent.com/Delutto/NetStatGUI/main/bin/NetStatGUI.exe"
+    )
+    NETSTATGUI_FILENAME = "NetStatGUI.exe"
 
     def __init__(self, root: tk.Tk) -> None:
         self.root = root
@@ -94,46 +151,98 @@ class SystemDiagnosticsApp:
         self.root.minsize(500, 400)
         self.root.resizable(True, True)
         self.root.configure(bg=BG_WHITE)
+        self._configure_styles()
 
         self.container = tk.Frame(self.root, bg=BG_WHITE)
         self.container.pack(fill="both", expand=True)
-        self.main_frame = tk.Frame(self.container, bg=BG_WHITE)
+        self.initial_frame = tk.Frame(self.container, bg=BG_WHITE)
+        self.tools_frame = tk.Frame(self.container, bg=BG_WHITE)
+        self.printer_frame = tk.Frame(self.container, bg=BG_WHITE)
+        self.files_frame = tk.Frame(self.container, bg=BG_WHITE)
         self.commands_frame = tk.Frame(self.container, bg=BG_WHITE)
-
-        self._buttons: list[tk.Button] = []
-        self._button_labels: dict[tk.Button, str] = {}
-        self._result_queue: queue.Queue[tuple[str, str | None]] = queue.Queue()
-        self._busy = False
-
-        self._command_buttons: list[tk.Button] = []
-        self._command_button_labels: dict[tk.Button, str] = {}
-        self._command_result_queue: queue.Queue[tuple[str, str | None]] = queue.Queue()
-        self._command_busy = False
-
-        self._build_main_frame()
-        self._build_commands_frame()
-        self.main_frame.pack(fill="both", expand=True)
-
-    def _build_main_frame(self) -> None:
-        """Monta a tela principal com ações à esquerda e resultados à direita."""
-        _, body = self._build_screen_shell(self.main_frame, WINDOW_TITLE)
-        self._build_main_sidebar(body)
-        self._build_results(body, "main")
-
-    def _build_commands_frame(self) -> None:
-        """Monta a tela de comandos no mesmo layout horizontal."""
-        _, body = self._build_screen_shell(
-            self.commands_frame, "Comandos — Anota AI"
+        self._frames = (
+            self.initial_frame,
+            self.tools_frame,
+            self.printer_frame,
+            self.files_frame,
+            self.commands_frame,
         )
-        self._build_commands_sidebar(body)
-        self._build_results(body, "commands")
+
+        self._buttons: dict[str, list[ttk.Button]] = {}
+        self._button_labels: dict[ttk.Button, str] = {}
+        self._outputs: dict[str, tk.Text] = {}
+        self._statuses: dict[str, tk.Label] = {}
+        self._result_queue: queue.Queue[tuple[str, str | None]] = queue.Queue()
+        self._command_result_queue: queue.Queue[tuple[str, str | None]] = queue.Queue()
+        self._busy = False
+        self._command_busy = False
+        self._active_screen = ""
+        self._pending_tool_output = ""
+        self._progress_total = 0
+        self._progress_current = 0
+
+        self._build_initial_frame()
+        self._build_tools_frame()
+        self._build_printer_frame()
+        self._build_files_frame()
+        self._build_commands_frame()
+        self.initial_frame.pack(fill="both", expand=True)
+
+    def _configure_styles(self) -> None:
+        """Configura o tema claro e os estilos compartilhados da interface."""
+        style = ttk.Style(self.root)
+        style.theme_use("clam")
+        style.configure(
+            "Rounded.TButton",
+            background=PRIMARY_COLOR,
+            foreground=TEXT_WHITE,
+            font=FONT_BUTTON,
+            borderwidth=0,
+            focusthickness=0,
+            padding=(12, 10),
+            relief="flat",
+        )
+        style.map(
+            "Rounded.TButton",
+            background=[("disabled", BG_LIGHT), ("pressed", HOVER_COLOR), ("active", HOVER_COLOR)],
+            foreground=[("disabled", "#A8A8A8"), ("!disabled", TEXT_WHITE)],
+        )
+        style.configure(
+            "Card.TButton",
+            background=BG_CARD,
+            foreground=TEXT_DARK,
+            font=FONT_CARD,
+            borderwidth=1,
+            bordercolor=BORDER_COLOR,
+            focusthickness=0,
+            padding=(20, 15),
+            relief="solid",
+        )
+        style.map(
+            "Card.TButton",
+            background=[("pressed", "#F1F1F2"), ("active", BG_CARD)],
+            foreground=[("pressed", HOVER_COLOR), ("active", PRIMARY_COLOR)],
+            bordercolor=[("pressed", HOVER_COLOR), ("active", PRIMARY_COLOR)],
+        )
+        style.configure(
+            "Output.TFrame",
+            background=BORDER_COLOR,
+        )
+        style.configure(
+            "Anota.Horizontal.TProgressbar",
+            troughcolor=BG_LIGHT,
+            background=PRIMARY_COLOR,
+            lightcolor=PRIMARY_COLOR,
+            darkcolor=PRIMARY_COLOR,
+            bordercolor=BORDER_COLOR,
+        )
 
     @staticmethod
     def _build_screen_shell(
         parent: tk.Misc, title_text: str
     ) -> tuple[tk.Frame, tk.Frame]:
-        """Cria cabeçalho e corpo compartilhados pelas duas telas."""
-        header = tk.Frame(parent, bg=PRIMARY_COLOR, height=70)
+        """Cria o cabeçalho vermelho e a área de conteúdo compartilhada."""
+        header = tk.Frame(parent, bg=PRIMARY_COLOR, height=HEADER_HEIGHT)
         header.pack(fill="x")
         header.pack_propagate(False)
         tk.Label(
@@ -142,145 +251,208 @@ class SystemDiagnosticsApp:
             bg=PRIMARY_COLOR,
             fg=TEXT_WHITE,
             anchor="w",
-            font=("Arial", 14, "bold"),
+            font=FONT_TITLE,
             padx=20,
         ).pack(fill="both", expand=True)
-
         body = tk.Frame(parent, bg=BG_WHITE)
         body.pack(fill="both", expand=True)
         return header, body
 
-    def _build_main_sidebar(self, body: tk.Frame) -> None:
-        sidebar = tk.Frame(body, bg=BG_LIGHT, width=200)
-        sidebar.pack(side="left", fill="y")
-        sidebar.pack_propagate(False)
-
-        actions = tk.Frame(sidebar, bg=BG_LIGHT, padx=12, pady=12)
-        actions.pack(fill="both", expand=True)
-        definitions: list[tuple[str, Action]] = [
-            ("Verificar Compatibilidade", self._check_compatibility),
-            ("Informações do Sistema", self._show_system_info),
-            ("Monitor de CPU", self._monitor_cpu),
-            ("Data/Hora e Sincronização", self._show_datetime),
-            ("Teste de Velocidade", self._speed_test),
-            ("Limpar Temporários", self._clean_temporaries),
-            ("Executar Tudo", self._run_all),
-            ("Comandos", self._open_commands),
+    def _build_initial_frame(self) -> None:
+        """Monta a tela inicial com somente os quatro atalhos de abas."""
+        _, body = self._build_screen_shell(self.initial_frame, WINDOW_TITLE)
+        content = tk.Frame(
+            body,
+            bg=BG_WHITE,
+            padx=PADDING_CONTENT[0],
+            pady=PADDING_CONTENT[1],
+        )
+        content.pack(fill="both", expand=True)
+        tk.Label(
+            content,
+            text="Selecione uma categoria",
+            bg=BG_WHITE,
+            fg=TEXT_DARK,
+            font=FONT_HEADING,
+        ).pack(pady=(0, 24))
+        definitions = [
+            ("🔧  Ferramentas", lambda: self._show_frame(self.tools_frame)),
+            ("🖨️  Impressora", lambda: self._show_frame(self.printer_frame)),
+            ("📁  Arquivos Úteis", lambda: self._show_frame(self.files_frame)),
+            ("⚡  Outros Comandos", lambda: self._show_frame(self.commands_frame)),
         ]
         for label, action in definitions:
-            button = self._make_button(actions, label, action)
-            button.pack(fill="x", pady=3)
-            self._buttons.append(button)
-            self._button_labels[button] = label
+            shadow = tk.Frame(content, bg=SHADOW_COLOR)
+            shadow.pack(fill="x", pady=6)
+            button = self._make_button(shadow, label, action, style_name="Card.TButton")
+            button.pack(fill="x", padx=PADX_BUTTONS, pady=(0, PADY_BUTTONS))
 
-        self._build_main_footer(sidebar)
+    def _build_tools_frame(self) -> None:
+        _, body = self._build_screen_shell(self.tools_frame, "Ferramentas — Anota AI")
+        definitions = [
+            ("Limpeza de Cache", self._clean_cache),
+            ("Sincronização de Hora", self._sync_time),
+            ("Compatibilidade", self._check_compatibility),
+            ("Teste de Velocidade", self._speed_test),
+            ("Monitor de CPU", self._monitor_cpu),
+            ("Executar Tudo", self._run_all),
+        ]
+        self._build_action_screen(body, "tools", definitions, with_progress=True)
 
-    def _build_commands_sidebar(self, body: tk.Frame) -> None:
-        sidebar = tk.Frame(body, bg=BG_LIGHT, width=200)
-        sidebar.pack(side="left", fill="y")
-        sidebar.pack_propagate(False)
-
-        actions = tk.Frame(sidebar, bg=BG_LIGHT, padx=12, pady=12)
-        actions.pack(fill="both", expand=True)
-        definitions: list[tuple[str, Action]] = [
+    def _build_printer_frame(self) -> None:
+        _, body = self._build_screen_shell(self.printer_frame, "Impressora — Anota AI")
+        definitions = [
             ("Abrir Impressoras", self._open_printers),
+            ("Limpar Fila de Impressão", self._clear_printer_queue),
+            ("Verificar PID na Porta 5000", self._check_port_5000),
+        ]
+        self._build_action_screen(body, "printer", definitions)
+
+    def _build_files_frame(self) -> None:
+        _, body = self._build_screen_shell(self.files_frame, "Arquivos Úteis — Anota AI")
+        definitions = [
             ("Baixar Instalador de Drivers", self._download_driver),
             ("Baixar Anota AI Desktop", self._download_desktop),
+            ("Baixar NetStatGUI", self._download_netstatgui),
         ]
+        self._build_action_screen(body, "files", definitions)
+
+    def _build_commands_frame(self) -> None:
+        _, body = self._build_screen_shell(self.commands_frame, "Outros Comandos — Anota AI")
+        definitions = [
+            ("Ipconfig", self._ipconfig),
+            ("ARP -a", self._arp),
+            ("MSCONFIG", self._open_msconfig),
+        ]
+        self._build_action_screen(body, "commands", definitions)
+
+    def _build_action_screen(
+        self,
+        body: tk.Frame,
+        screen: str,
+        definitions: list[tuple[str, Action]],
+        with_progress: bool = False,
+    ) -> None:
+        """Cria a composição horizontal: botões à esquerda e terminal à direita."""
+        sidebar = tk.Frame(body, bg=BG_LIGHT, width=SIDEBAR_WIDTH)
+        sidebar.pack(side="left", fill="y")
+        sidebar.pack_propagate(False)
+        actions = tk.Frame(
+            sidebar,
+            bg=BG_LIGHT,
+            padx=PADX_SIDEBAR,
+            pady=PADY_SIDEBAR,
+        )
+        actions.pack(fill="both", expand=True)
+        buttons: list[ttk.Button] = []
         for label, action in definitions:
             button = self._make_button(actions, label, action)
             button.pack(fill="x", pady=3)
-            self._command_buttons.append(button)
-            self._command_button_labels[button] = label
+            buttons.append(button)
+            self._button_labels[button] = label
+        self._buttons[screen] = buttons
 
-        self._build_commands_footer(sidebar)
+        self._build_results(body, screen, with_progress)
+        footer = tk.Frame(sidebar, bg=BG_LIGHT, padx=12, pady=10)
+        footer.pack(side="bottom", fill="x")
+        status = tk.Label(
+            footer,
+            text="Status: Pronto",
+            bg=BG_LIGHT,
+            fg=ACCENT_GREEN,
+            anchor="w",
+            font=FONT_STATUS,
+        )
+        status.pack(fill="x", pady=(0, 7))
+        self._statuses[screen] = status
+        if with_progress:
+            clear_button = self._make_button(
+                footer, "Limpar", lambda: self._clear_screen_output(screen)
+            )
+            clear_button.pack(side="left", fill="x", expand=True, padx=(0, 3))
+            self._buttons[screen].append(clear_button)
+            self._button_labels[clear_button] = "Limpar"
+        back_button = self._make_button(footer, "Voltar", self._back_to_initial)
+        back_button.pack(
+            side="left" if with_progress else "top", fill="x", expand=with_progress
+        )
+        self._buttons[screen].append(back_button)
+        self._button_labels[back_button] = "Voltar"
 
     @staticmethod
     def _make_button(
-        parent: tk.Misc, label: str, action: Action
-    ) -> tk.Button:
-        """Cria um botão Tk nativo, sem desenho customizado ou cantos arredondados."""
-        button = tk.Button(
+        parent: tk.Misc,
+        label: str,
+        action: Action,
+        style_name: str = "Rounded.TButton",
+    ) -> ttk.Button:
+        """Cria botões ttk, preservando o estilo especial dos cards iniciais."""
+        if style_name == "Card.TButton":
+            return ttk.Button(
+                parent,
+                text=label,
+                command=action,
+                width=22,
+                style=style_name,
+                cursor="hand2",
+            )
+        return ttk.Button(
             parent,
             text=label,
             command=action,
-            width=22,
-            padx=12,
-            pady=8,
-            bg=PRIMARY_COLOR,
-            fg=TEXT_WHITE,
-            activebackground=HOVER_COLOR,
-            activeforeground=TEXT_WHITE,
-            font=("Segoe UI", 9, "bold"),
-            borderwidth=0,
-            relief="flat",
-            highlightthickness=0,
+            style="Rounded.TButton",
             cursor="hand2",
-            anchor="center",
         )
 
-        def on_enter(event: tk.Event) -> None:
-            if event.widget.cget("state") != tk.DISABLED:
-                event.widget.configure(bg=HOVER_COLOR)
-
-        def on_leave(event: tk.Event) -> None:
-            if event.widget.cget("state") != tk.DISABLED:
-                event.widget.configure(bg=PRIMARY_COLOR)
-
-        button.bind("<Enter>", on_enter)
-        button.bind("<Leave>", on_leave)
-        return button
-
-    def _build_results(self, body: tk.Frame, screen: str) -> None:
-        """Cria o painel de resultados branco com texto e rolagem."""
-        results_frame = tk.Frame(body, bg=BG_WHITE, padx=12, pady=12)
-        results_frame.pack(side="left", fill="both", expand=True)
-        results_frame.grid_rowconfigure(1, weight=1)
-        results_frame.grid_columnconfigure(0, weight=1)
-
-        progress_frame = tk.Frame(results_frame, bg=BG_WHITE)
-        progress_frame.grid(row=0, column=0, columnspan=2, sticky="ew", pady=(0, 8))
-        progress_frame.grid_columnconfigure(0, weight=1)
-        progress_label = tk.Label(
-            progress_frame,
-            text="",
+    def _build_results(self, body: tk.Frame, screen: str, with_progress: bool) -> None:
+        results_frame = tk.Frame(
+            body,
             bg=BG_WHITE,
-            fg=TEXT_DARK,
-            anchor="w",
-            font=("Segoe UI", 9, "bold"),
+            padx=PADDING_BODY[0],
+            pady=PADDING_BODY[1],
         )
-        progress_label.grid(row=0, column=0, sticky="ew", pady=(0, 5))
-
-        progress_style = ttk.Style(self.root)
-        progress_style.configure(
-            "Anota.Horizontal.TProgressbar",
-            troughcolor=BG_LIGHT,
-            background=PRIMARY_COLOR,
-            lightcolor=PRIMARY_COLOR,
-            darkcolor=PRIMARY_COLOR,
-            bordercolor=BORDER_COLOR,
-        )
-        progress_bar = ttk.Progressbar(
-            progress_frame,
-            orient="horizontal",
-            mode="determinate",
-            style="Anota.Horizontal.TProgressbar",
-        )
-        progress_bar.grid(row=1, column=0, sticky="ew")
-        progress_frame.grid_remove()
-
+        results_frame.pack(side="left", fill="both", expand=True)
+        row = 0
+        progress_frame = None
+        progress_label = None
+        progress_bar = None
+        if with_progress:
+            progress_frame = tk.Frame(results_frame, bg=BG_WHITE)
+            progress_frame.grid(row=0, column=0, sticky="ew", pady=(0, 8))
+            progress_frame.grid_columnconfigure(0, weight=1)
+            progress_label = tk.Label(
+                progress_frame,
+                text="",
+                bg=BG_WHITE,
+                fg=TEXT_DARK,
+                anchor="w",
+                font=FONT_STATUS,
+            )
+            progress_label.grid(row=0, column=0, sticky="ew", pady=(0, 5))
+            progress_bar = ttk.Progressbar(
+                progress_frame,
+                orient="horizontal",
+                mode="determinate",
+                style="Anota.Horizontal.TProgressbar",
+            )
+            progress_bar.grid(row=1, column=0, sticky="ew")
+            progress_frame.grid_remove()
+            row = 1
+        results_frame.grid_rowconfigure(row, weight=1)
+        results_frame.grid_columnconfigure(0, weight=1)
+        output_frame = ttk.Frame(results_frame, style="Output.TFrame", padding=1)
+        output_frame.grid(row=row, column=0, sticky="nsew")
         output = tk.Text(
-            results_frame,
+            output_frame,
             wrap="word",
             bg=BG_WHITE,
             fg=TEXT_DARK,
             insertbackground=TEXT_DARK,
-            font=("Consolas", 10),
-            relief="solid",
-            borderwidth=1,
-            bd=1,
-            highlightbackground=BORDER_COLOR,
-            highlightcolor=BORDER_COLOR,
+            font=FONT_TERMINAL,
+            relief="flat",
+            borderwidth=0,
+            bd=0,
+            highlightthickness=0,
             padx=10,
             pady=10,
             state="disabled",
@@ -297,70 +469,35 @@ class SystemDiagnosticsApp:
             borderwidth=0,
         )
         output.configure(yscrollcommand=scrollbar.set)
-        output.grid(row=1, column=0, sticky="nsew")
-        scrollbar.grid(row=1, column=1, sticky="ns")
-
-        if screen == "main":
-            output.tag_configure("positive", foreground=ACCENT_GREEN)
-            output.tag_configure("negative", foreground=PRIMARY_COLOR)
-            output.tag_configure("normal", foreground=TEXT_DARK)
-            self.output = output
-            self.progress_frame = progress_frame
-            self.progress_label = progress_label
-            self.progress_bar = progress_bar
+        output.pack(fill="both", expand=True)
+        scrollbar.grid(row=row, column=1, sticky="ns")
+        self._outputs[screen] = output
+        if with_progress:
+            self._output_frame = output_frame
+        if with_progress:
+            self._progress_frame = progress_frame
+            self._progress_label = progress_label
+            self._progress_bar = progress_bar
             self._output_scrollbar = scrollbar
-            self._progress_total = 0
-            self._progress_current = 0
-        else:
-            self.command_output = output
 
-    def _build_main_footer(self, sidebar: tk.Frame) -> None:
-        footer = tk.Frame(sidebar, bg=BG_LIGHT, padx=12, pady=10)
-        footer.pack(side="bottom", fill="x")
-        self.status = tk.Label(
-            footer,
-            text="Status: Pronto",
-            bg=BG_LIGHT,
-            fg=ACCENT_GREEN,
-            anchor="w",
-            font=("Segoe UI", 9, "bold"),
-        )
-        self.status.pack(fill="x", pady=(0, 7))
+    def _show_frame(self, frame: tk.Frame) -> None:
+        if self._busy or self._command_busy:
+            return
+        for current in self._frames:
+            current.pack_forget()
+        frame.pack(fill="both", expand=True)
 
-        buttons = tk.Frame(footer, bg=BG_LIGHT)
-        buttons.pack(fill="x")
-        clear_button = self._make_button(buttons, "Limpar", self.clear_output)
-        clear_button.pack(side="left", fill="x", expand=True, padx=(0, 3))
-        exit_button = self._make_button(buttons, "Sair", self.root.destroy)
-        exit_button.pack(side="left", fill="x", expand=True, padx=(3, 0))
-        self._buttons.extend((clear_button, exit_button))
-        self._button_labels[clear_button] = "Limpar"
-        self._button_labels[exit_button] = "Sair"
+    def _back_to_initial(self) -> None:
+        """Retorna ao menu inicial sem abrir uma nova janela."""
+        self._show_frame(self.initial_frame)
 
-    def _build_commands_footer(self, sidebar: tk.Frame) -> None:
-        footer = tk.Frame(sidebar, bg=BG_LIGHT, padx=12, pady=10)
-        footer.pack(side="bottom", fill="x")
-        self.command_status = tk.Label(
-            footer,
-            text="Status: Pronto",
-            bg=BG_LIGHT,
-            fg=ACCENT_GREEN,
-            anchor="w",
-            font=("Segoe UI", 9, "bold"),
-        )
-        self.command_status.pack(fill="x", pady=(0, 7))
-        back_button = self._make_button(footer, "Voltar", self._back_to_main)
-        back_button.pack(fill="x")
-        self._command_buttons.append(back_button)
-        self._command_button_labels[back_button] = "Voltar"
-
-    def _append_output(self, text: str) -> None:
-        """Adiciona texto à área de resultados na thread da interface."""
-        self.output.configure(state="normal")
+    def _append_output(self, screen: str, text: str) -> None:
+        output = self._outputs[screen]
+        output.configure(state="normal")
         current = 0
         tag = "normal"
         for match in ANSI_RE.finditer(text):
-            self.output.insert("end", text[current : match.start()], tag)
+            output.insert("end", text[current : match.start()], tag)
             codes = match.group(1).split(";")
             if "92" in codes:
                 tag = "positive"
@@ -369,97 +506,78 @@ class SystemDiagnosticsApp:
             elif not match.group(1) or "0" in codes:
                 tag = "normal"
             current = match.end()
-        self.output.insert("end", text[current:], tag)
-        self.output.see("end")
-        self.output.configure(state="disabled")
+        output.insert("end", text[current:], tag)
+        output.see("end")
+        output.configure(state="disabled")
 
     def _append_command_output(self, text: str) -> None:
-        """Adiciona status à área de comandos."""
-        self.command_output.configure(state="normal")
-        self.command_output.insert("end", text)
-        self.command_output.see("end")
-        self.command_output.configure(state="disabled")
+        if self._active_screen:
+            self._append_output(self._active_screen, text)
 
-    def clear_output(self) -> None:
-        """Limpa os resultados principais quando não há operação em curso."""
-        if self._busy:
+    def _clear_screen_output(self, screen: str) -> None:
+        if self._busy or self._command_busy:
             return
-        self._clear_output()
+        output = self._outputs[screen]
+        output.configure(state="normal")
+        output.delete("1.0", "end")
+        output.configure(state="disabled")
 
-    def _clear_output(self) -> None:
-        self.output.configure(state="normal")
-        self.output.delete("1.0", "end")
-        self.output.configure(state="disabled")
-
-    def _show_progress(self, label_text: str, total: int = 0) -> None:
-        """Mostra a barra no painel direito e oculta o relatório até terminar."""
-        self._clear_output()
-        self.output.grid_remove()
+    def _show_progress(self, label_text: str, total: int) -> None:
+        output = self._outputs["tools"]
+        output.configure(state="normal")
+        output.delete("1.0", "end")
+        output.configure(state="disabled")
+        self._output_frame.grid_remove()
         self._output_scrollbar.grid_remove()
         self._progress_total = total
         self._progress_current = 0
-        self._active_progress_name = label_text
-        self.progress_label.configure(text=f"Executando: {label_text}...")
-        self.progress_frame.grid()
-        if total > 0:
-            self.progress_bar.stop()
-            self.progress_bar.configure(mode="determinate", maximum=total, value=0)
+        self._progress_label.configure(text=f"Executando: {label_text}...")
+        self._progress_frame.grid()
+        if total:
+            self._progress_bar.stop()
+            self._progress_bar.configure(mode="determinate", maximum=total, value=0)
         else:
-            self.progress_bar.configure(mode="indeterminate", value=0)
-            self.progress_bar.start(10)
+            self._progress_bar.configure(mode="indeterminate", value=0)
+            self._progress_bar.start(10)
 
     def _hide_progress(self) -> None:
-        """Para a animação e reexibe o relatório principal."""
-        self.progress_bar.stop()
-        self.progress_frame.grid_remove()
-        self.output.grid(row=1, column=0, sticky="nsew")
+        self._progress_bar.stop()
+        self._progress_frame.grid_remove()
+        self._output_frame.grid(row=1, column=0, sticky="nsew")
         self._output_scrollbar.grid(row=1, column=1, sticky="ns")
-
-    def _update_progress(self, current: int, total: int, label: str) -> None:
-        self.progress_bar.configure(mode="determinate", maximum=total, value=current)
-        self.progress_label.configure(
-            text=f"Executando: {label}... ({current}/{total})"
-        )
 
     def _progress_name(self, section_title: str) -> str:
         names = {
-            "VERIFICAÇÃO DE COMPATIBILIDADE — ANOTA AI": "Verificando compatibilidade",
-            "INFORMAÇÕES DO SISTEMA": "Coletando informações do sistema",
+            "LIMPEZA DE CACHE": "Limpando cache",
+            "SINCRONIZAÇÃO DE HORA": "Sincronizando hora",
+            "VERIFICAÇÃO DE COMPATIBILIDADE": "Verificando compatibilidade",
+            "TESTE DE VELOCIDADE": "Testando velocidade",
             "MONITOR DE CPU": "Monitorando CPU",
-            "DATA, HORA E SINCRONIZAÇÃO": "Sincronizando data e hora",
-            "TESTE DE VELOCIDADE DA INTERNET": "Testando velocidade",
-            "LIMPEZA DE ARQUIVOS TEMPORÁRIOS": "Limpando temporários",
         }
         return names.get(section_title, section_title)
 
-    def _set_busy(self, label: str) -> None:
+    def _set_tool_busy(self, label: str) -> None:
         self._busy = True
-        self.status.configure(text="Status: Executando...", fg=PRIMARY_COLOR)
-        for button in self._buttons:
+        self._active_screen = "tools"
+        self._statuses["tools"].configure(text="Status: Executando...", fg=PRIMARY_COLOR)
+        for button in self._buttons["tools"]:
             button.configure(state="disabled")
-        for button, button_label in self._button_labels.items():
-            if button_label == label:
+            if self._button_labels[button] == label:
                 button.configure(text="Executando...")
-                break
 
-    def _set_ready(self) -> None:
+    def _set_tool_ready(self) -> None:
         self._busy = False
-        self.status.configure(text="Status: Pronto", fg=ACCENT_GREEN)
-        for button in self._buttons:
+        self._statuses["tools"].configure(text="Status: Pronto", fg=ACCENT_GREEN)
+        for button in self._buttons["tools"]:
             button.configure(state="normal", text=self._button_labels[button])
 
     def _start_operation(self, label: str, sections: list[Section]) -> None:
-        """Inicia uma ou mais seções em uma thread de trabalho."""
-        if self._busy:
+        if self._busy or self._command_busy:
             return
-        self._set_busy(label)
-        progress_name = (
-            self._progress_name(sections[0][0]) if len(sections) == 1 else label
-        )
-        self._show_progress(
-            progress_name,
-            total=len(sections) if len(sections) > 1 else 0,
-        )
+        self._set_tool_busy(label)
+        self._pending_tool_output = ""
+        progress_name = label if len(sections) > 1 else self._progress_name(sections[0][0])
+        self._show_progress(progress_name, len(sections))
         worker = threading.Thread(
             target=self._run_sections,
             args=(sections,),
@@ -470,7 +588,6 @@ class SystemDiagnosticsApp:
         self.root.after(50, self._process_queue)
 
     def _run_sections(self, sections: list[Section]) -> None:
-        """Executa as seções fora da thread principal e captura seus prints."""
         for title, action in sections:
             self._result_queue.put(("progress", title))
             captured = StringIO()
@@ -479,98 +596,59 @@ class SystemDiagnosticsApp:
                     action()
                 except Exception as exc:  # pragma: no cover - proteção da thread
                     print(f"Não foi possível concluir esta seção: {exc}")
-            result = (
-                f"\n{'=' * 64}\n{title}\n{'=' * 64}\n"
-                f"{captured.getvalue()}"
-                f"\n{'-' * 64}\n"
+            self._result_queue.put(
+                (
+                    "output",
+                    f"\n{'=' * 64}\n{title}\n{'=' * 64}\n"
+                    f"{captured.getvalue()}\n{'-' * 64}\n",
+                )
             )
-            self._result_queue.put(("output", result))
         self._result_queue.put(("done", None))
 
     def _process_queue(self) -> None:
-        """Entrega os resultados do diagnóstico à interface via ``after``."""
-        finished = False
         try:
             message_type, payload = self._result_queue.get_nowait()
         except queue.Empty:
             message_type, payload = None, None
-
-        if message_type == "progress" and payload is not None:
+        if message_type == "progress" and payload:
             progress_name = self._progress_name(payload)
-            self._active_progress_name = progress_name
-            if self._progress_total > 0:
-                next_step = min(self._progress_current + 1, self._progress_total)
-                self.progress_bar.configure(
-                    mode="determinate",
-                    maximum=self._progress_total,
-                    value=self._progress_current,
-                )
-                self.progress_label.configure(
-                    text=(
-                        f"Executando: {progress_name}... "
-                        f"({next_step}/{self._progress_total})"
-                    )
-                )
-            else:
-                self.progress_label.configure(
-                    text=f"Executando: {progress_name}..."
-                )
-        elif message_type == "output" and payload is not None:
-            # O texto é acumulado enquanto a barra está visível e só aparece
-            # quando todas as seções terminarem.
-            self._append_output(payload)
-            if self._progress_total > 0:
-                self._progress_current = min(
-                    self._progress_current + 1, self._progress_total
-                )
-                self._update_progress(
-                    self._progress_current,
-                    self._progress_total,
-                    self._active_progress_name,
-                )
+            next_step = min(self._progress_current + 1, self._progress_total)
+            self._progress_label.configure(
+                text=f"Executando: {progress_name}... ({next_step}/{self._progress_total})"
+            )
+        elif message_type == "output" and payload:
+            self._pending_tool_output += payload
+            self._progress_current = min(self._progress_current + 1, self._progress_total)
+            self._progress_bar.configure(
+                mode="determinate", maximum=self._progress_total, value=self._progress_current
+            )
         elif message_type == "done":
-            finished = True
-
-        if finished:
+            self._append_output("tools", self._pending_tool_output)
             self._hide_progress()
-            self._set_ready()
-        elif self._busy:
+            self._set_tool_ready()
+            return
+        if self._busy:
             self.root.after(50, self._process_queue)
 
-    def _open_commands(self) -> None:
-        """Troca a tela principal pela tela de comandos no mesmo root."""
-        if self._busy:
-            return
-        self.main_frame.pack_forget()
-        self.commands_frame.pack(fill="both", expand=True)
+    # ---- Aba Ferramentas -------------------------------------------------
 
-    def _back_to_main(self) -> None:
-        """Retorna à tela principal sem criar ou destruir uma janela."""
-        if self._command_busy:
-            return
-        self.commands_frame.pack_forget()
-        self.main_frame.pack(fill="both", expand=True)
+    def _clean_cache(self) -> None:
+        self._start_operation("Limpeza de Cache", [("LIMPEZA DE CACHE", display_temp_cleaner)])
+
+    def _sync_time(self) -> None:
+        self._start_operation(
+            "Sincronização de Hora", [("SINCRONIZAÇÃO DE HORA", display_datetime_sync)]
+        )
 
     def _check_compatibility(self) -> None:
         self._start_operation(
-            "Verificar Compatibilidade",
-            [
-                (
-                    "VERIFICAÇÃO DE COMPATIBILIDADE — ANOTA AI",
-                    display_compatibility_check,
-                )
-            ],
+            "Compatibilidade",
+            [("VERIFICAÇÃO DE COMPATIBILIDADE", display_compatibility_check)],
         )
 
-    def _show_system_info(self) -> None:
+    def _speed_test(self) -> None:
         self._start_operation(
-            "Informações do Sistema",
-            [
-                (
-                    "INFORMAÇÕES DO SISTEMA",
-                    lambda: display_system_info(collect_system_info()),
-                )
-            ],
+            "Teste de Velocidade", [("TESTE DE VELOCIDADE", display_speed_test)]
         )
 
     def _monitor_cpu(self) -> None:
@@ -579,85 +657,60 @@ class SystemDiagnosticsApp:
             [("MONITOR DE CPU", lambda: monitor_cpu(duration=10, interval=1.0))],
         )
 
-    def _show_datetime(self) -> None:
-        self._start_operation(
-            "Data/Hora e Sincronização",
-            [("DATA, HORA E SINCRONIZAÇÃO", display_datetime_sync)],
-        )
-
-    def _speed_test(self) -> None:
-        self._start_operation(
-            "Teste de Velocidade",
-            [("TESTE DE VELOCIDADE DA INTERNET", display_speed_test)],
-        )
-
-    def _clean_temporaries(self) -> None:
-        self._start_operation(
-            "Limpar Temporários",
-            [("LIMPEZA DE ARQUIVOS TEMPORÁRIOS", display_temp_cleaner)],
-        )
-
     def _run_all(self) -> None:
         self._start_operation(
             "Executar Tudo",
             [
-                (
-                    "VERIFICAÇÃO DE COMPATIBILIDADE — ANOTA AI",
-                    display_compatibility_check,
-                ),
-                (
-                    "INFORMAÇÕES DO SISTEMA",
-                    lambda: display_system_info(collect_system_info()),
-                ),
+                ("LIMPEZA DE CACHE", display_temp_cleaner),
+                ("SINCRONIZAÇÃO DE HORA", display_datetime_sync),
+                ("VERIFICAÇÃO DE COMPATIBILIDADE", display_compatibility_check),
+                ("TESTE DE VELOCIDADE", display_speed_test),
                 ("MONITOR DE CPU", lambda: monitor_cpu(duration=10, interval=1.0)),
-                ("DATA, HORA E SINCRONIZAÇÃO", display_datetime_sync),
-                ("TESTE DE VELOCIDADE DA INTERNET", display_speed_test),
-                ("LIMPEZA DE ARQUIVOS TEMPORÁRIOS", display_temp_cleaner),
             ],
         )
 
-    # ---- Comandos utilitários -------------------------------------------------
+    # ---- Abas Impressora e Outros Comandos -------------------------------
 
-    def _set_command_busy(self, label: str) -> None:
+    def _set_command_busy(self, screen: str, label: str) -> None:
         self._command_busy = True
-        self.command_status.configure(text="Status: Executando...", fg=PRIMARY_COLOR)
-        for button in self._command_buttons:
+        self._active_screen = screen
+        self._statuses[screen].configure(text="Status: Executando...", fg=PRIMARY_COLOR)
+        for button in self._buttons[screen]:
             button.configure(state="disabled")
-        self._append_command_output(f"{label}\n")
+            if self._button_labels[button] == label:
+                button.configure(text="Executando...")
+        self._append_output(screen, f"{label}\n")
 
     def _set_command_ready(self) -> None:
+        screen = self._active_screen
         self._command_busy = False
-        self.command_status.configure(text="Status: Pronto", fg=ACCENT_GREEN)
-        for button in self._command_buttons:
-            button.configure(
-                state="normal", text=self._command_button_labels[button]
-            )
+        self._statuses[screen].configure(text="Status: Pronto", fg=ACCENT_GREEN)
+        for button in self._buttons[screen]:
+            button.configure(state="normal", text=self._button_labels[button])
 
-    def _start_command_thread(
-        self,
-        label: str,
-        action: Action,
-        error_prefix: str = "Erro",
-    ) -> None:
-        if self._command_busy:
+    def _start_command_thread(self, screen: str, label: str, action: Action) -> None:
+        if self._busy or self._command_busy:
             return
-        self._set_command_busy(label)
+        self._set_command_busy(screen, label)
         worker = threading.Thread(
             target=self._run_command_action,
-            args=(action, error_prefix),
+            args=(action,),
             daemon=True,
             name="sysinfo-command",
         )
         worker.start()
         self.root.after(50, self._process_command_queue)
 
-    def _run_command_action(self, action: Action, error_prefix: str) -> None:
+    def _run_command_action(self, action: Action) -> None:
         try:
             action()
         except Exception as exc:  # pragma: no cover - proteção da thread
-            self._command_result_queue.put(("output", f"{error_prefix}: {exc}\n"))
+            self._command_result_queue.put(("output", f"Erro: {exc}\n"))
         finally:
             self._command_result_queue.put(("done", None))
+
+    def _queue_command_output(self, text: str) -> None:
+        self._command_result_queue.put(("output", f"{text}\n"))
 
     def _process_command_queue(self) -> None:
         finished = False
@@ -666,7 +719,7 @@ class SystemDiagnosticsApp:
                 message_type, payload = self._command_result_queue.get_nowait()
             except queue.Empty:
                 break
-            if message_type == "output" and payload is not None:
+            if message_type == "output" and payload:
                 self._append_command_output(payload)
             elif message_type == "done":
                 finished = True
@@ -675,59 +728,87 @@ class SystemDiagnosticsApp:
         elif self._command_busy:
             self.root.after(50, self._process_command_queue)
 
+    def _open_printers(self) -> None:
+        log_audit("open_printers", "Abrindo pasta de impressoras do Windows")
+        self._start_command_thread("printer", "Abrir Impressoras", self._open_printers_worker)
+
+    def _open_printers_worker(self) -> None:
+        if platform.system() != "Windows":
+            self._queue_command_output("Disponível apenas no Windows")
+            return
+        subprocess.Popen(["explorer", self.PRINTERS_COMMAND], creationflags=_creation_flags())
+        self._queue_command_output("Abrindo pasta de Impressoras...")
+
+    def _clear_printer_queue(self) -> None:
+        self._start_command_thread(
+            "printer", "Limpar Fila de Impressão", lambda: self._queue_command_output(_clear_print_queue())
+        )
+
+    def _check_port_5000(self) -> None:
+        command = ["cmd", "/c", 'netstat -ano | findstr ":5000"']
+        self._start_command_thread(
+            "printer",
+            "Verificar PID na Porta 5000",
+            lambda: self._queue_command_output(_run_command_capture(command)),
+        )
+
+    def _ipconfig(self) -> None:
+        self._start_command_thread(
+            "commands", "Ipconfig", lambda: self._queue_command_output(_run_command_capture(["ipconfig", "/all"]))
+        )
+
+    def _arp(self) -> None:
+        self._start_command_thread(
+            "commands", "ARP -a", lambda: self._queue_command_output(_run_command_capture(["arp", "-a"]))
+        )
+
+    def _open_msconfig(self) -> None:
+        self._start_command_thread("commands", "MSCONFIG", self._open_msconfig_worker)
+
+    def _open_msconfig_worker(self) -> None:
+        if platform.system() != "Windows":
+            self._queue_command_output("Disponível apenas no Windows")
+            return
+        subprocess.Popen(["msconfig"], creationflags=_creation_flags())
+        self._queue_command_output("Abrindo MSCONFIG...")
+
+    # ---- Aba Arquivos Úteis ----------------------------------------------
+
     @staticmethod
     def _downloads_path() -> str:
-        """Retorna a pasta Downloads do usuário, priorizando o Windows."""
         if platform.system() == "Windows":
             user_profile = os.environ.get("USERPROFILE")
             if user_profile:
                 return os.path.join(user_profile, "Downloads")
         return os.path.join(os.path.expanduser("~"), "Downloads")
 
-    def _open_printers(self) -> None:
-        log_audit("open_printers", "Abrindo pasta de impressoras do Windows")
-        self._start_command_thread("Abrir Impressoras", self._open_printers_worker)
-
-    def _open_printers_worker(self) -> None:
-        if platform.system() != "Windows":
-            self._command_result_queue.put(
-                ("output", "Disponível apenas no Windows\n")
-            )
-            return
-        subprocess.Popen(["explorer", self.PRINTERS_COMMAND])
-        self._command_result_queue.put(("output", "Abrindo pasta de Impressoras...\n"))
-
     def _download_driver(self) -> None:
         self._start_command_thread(
-            "Baixar Instalador de Drivers",
-            lambda: self._download_file(
-                self.DRIVER_URL,
-                self.DRIVER_FILENAME,
-                "Baixando Instalador de Drivers...",
-            ),
-            error_prefix="Erro ao baixar",
+            "files", "Baixar Instalador de Drivers", lambda: self._download_file(
+                self.DRIVER_URL, self.DRIVER_FILENAME, "Baixando Instalador de Drivers..."
+            )
         )
 
     def _download_desktop(self) -> None:
         self._start_command_thread(
-            "Baixar Anota AI Desktop",
-            lambda: self._download_file(
-                self.DESKTOP_URL,
-                self.DESKTOP_FILENAME,
-                "Baixando Anota AI Desktop...",
-            ),
-            error_prefix="Erro ao baixar",
+            "files", "Baixar Anota AI Desktop", lambda: self._download_file(
+                self.DESKTOP_URL, self.DESKTOP_FILENAME, "Baixando Anota AI Desktop..."
+            )
+        )
+
+    def _download_netstatgui(self) -> None:
+        self._start_command_thread(
+            "files", "Baixar NetStatGUI", lambda: self._download_file(
+                self.NETSTATGUI_URL, self.NETSTATGUI_FILENAME, "Baixando NetStatGUI..."
+            )
         )
 
     def _download_file(self, url: str, filename: str, message: str) -> None:
-        """Baixa um arquivo somente de uma origem HTTPS confiável e registra o hash."""
+        """Baixa uma origem HTTPS confiável, calcula hash e abre Downloads."""
         if not validate_url(url):
-            self._command_result_queue.put(
-                ("output", "Erro: URL inválida ou não confiável\n")
-            )
+            self._queue_command_output("Erro: URL inválida ou não confiável")
             log_audit("download_failed", f"URL rejeitada: {url}")
             return
-
         downloads_path = self._downloads_path()
         destination = os.path.join(downloads_path, filename)
         log_audit("download_start", f"Baixando de {url} para {destination}")
@@ -735,9 +816,9 @@ class SystemDiagnosticsApp:
             os.makedirs(downloads_path, exist_ok=True)
         except OSError as error:
             log_audit("download_failed", f"Erro: {error}")
-            self._command_result_queue.put(("output", f"Erro ao baixar: {error}\n"))
+            self._queue_command_output(f"Erro ao baixar: {error}")
             return
-        self._command_result_queue.put(("output", f"{message}\n"))
+        self._queue_command_output(message)
 
         def reporthook(block_number: int, block_size: int, total_size: int) -> None:
             downloaded = block_number * block_size
@@ -745,28 +826,24 @@ class SystemDiagnosticsApp:
                 percent = min(100, int(downloaded * 100 / total_size))
                 total_mb = total_size / (1024 * 1024)
                 downloaded_mb = min(downloaded, total_size) / (1024 * 1024)
-                progress = (
-                    f"Baixando... {percent}% "
-                    f"({downloaded_mb:.1f} MB / {total_mb:.1f} MB)\n"
+                self._queue_command_output(
+                    f"Baixando... {percent}% ({downloaded_mb:.1f} MB / {total_mb:.1f} MB)"
                 )
             else:
-                progress = "Baixando...\n"
-            self._command_result_queue.put(("output", progress))
+                self._queue_command_output("Baixando...")
 
         try:
             urllib.request.urlretrieve(url, destination, reporthook=reporthook)
             sha256 = calculate_sha256(destination)
         except Exception as error:
             log_audit("download_failed", f"Erro: {error}")
-            self._command_result_queue.put(("output", f"Erro ao baixar: {error}\n"))
+            self._queue_command_output(f"Erro ao baixar: {error}")
             return
-
         log_audit("download_complete", f"Arquivo: {destination}, SHA-256: {sha256}")
-        self._command_result_queue.put(
-            ("output", f"Download concluído: {destination}\n")
-        )
+        self._queue_command_output(f"Download concluído: {destination}")
+        self._queue_command_output(f"SHA-256: {sha256}")
         if platform.system() == "Windows":
-            subprocess.Popen(["explorer", downloads_path])
+            subprocess.Popen(["explorer", downloads_path], creationflags=_creation_flags())
 
 
 _ICON_B64 = (
