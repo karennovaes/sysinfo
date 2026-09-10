@@ -21,10 +21,6 @@ try:
 except ImportError:  # Permite usar as rotinas não gráficas em ambientes sem Tk.
     tk = None
     ttk = None
-
-# Bases neutras permitem importar o módulo em servidores sem display/Tk.
-_CanvasBase = tk.Canvas if tk is not None else object
-_FrameBase = tk.Frame if tk is not None else object
 import urllib.request
 from collections.abc import Callable
 from contextlib import redirect_stdout
@@ -67,252 +63,6 @@ Section = tuple[str, Action]
 ANSI_RE = re.compile(r"\x1b\[([0-9;]*)m")
 
 
-def _rounded_shape(
-    canvas: tk.Canvas,
-    width: int,
-    height: int,
-    radius: int,
-    fill: str,
-    outline: str = "",
-    outline_width: int = 0,
-) -> None:
-    """Desenha uma forma arredondada usando apenas primitivas do Canvas."""
-    canvas.delete("rounded-shape")
-    if width <= 0 or height <= 0:
-        return
-    radius = max(1, min(radius, width // 2, height // 2))
-    x1, y1, x2, y2 = 0, 0, width, height
-    diameter = radius * 2
-    arc_options = {
-        "style": "pieslice",
-        "fill": fill,
-        "outline": outline,
-        "width": outline_width,
-        "tags": "rounded-shape",
-    }
-    # Cada arco preenche um dos quatro quadrantes do canto.
-    canvas.create_arc(x1, y1, x1 + diameter, y1 + diameter, start=0, extent=90, **arc_options)
-    canvas.create_arc(x2 - diameter, y1, x2, y1 + diameter, start=90, extent=90, **arc_options)
-    canvas.create_arc(x2 - diameter, y2 - diameter, x2, y2, start=180, extent=90, **arc_options)
-    canvas.create_arc(x1, y2 - diameter, x1 + diameter, y2, start=270, extent=90, **arc_options)
-    # Retângulos centrais completam a área entre os quatro cantos.
-    canvas.create_rectangle(
-        x1 + radius, y1, x2 - radius, y2,
-        fill=fill, outline=outline, width=outline_width, tags="rounded-shape",
-    )
-    canvas.create_rectangle(
-        x1, y1 + radius, x2, y2 - radius,
-        fill=fill, outline=outline, width=outline_width, tags="rounded-shape",
-    )
-
-
-class RoundedButton(_CanvasBase):
-    """Botão Canvas com cantos realmente arredondados e estado de hover."""
-
-    def __init__(
-        self,
-        parent: tk.Misc,
-        text: str,
-        command: Action | None = None,
-        *,
-        variant: str = "primary",
-        width: int = 180,
-        height: int = 38,
-        radius: int = 12,
-        **kwargs: object,
-    ) -> None:
-        if tk is None:
-            raise RuntimeError("Tk não está disponível neste ambiente")
-        self._text = text
-        self._command = command
-        self._variant = variant
-        self._radius = radius
-        self._disabled = False
-        self._pressed = False
-        self._font = kwargs.pop("font", ("Segoe UI", 9, "bold"))
-        self._colors = self._get_colors(variant)
-        canvas_options = {
-            "width": width,
-            "height": height,
-            "bg": kwargs.pop("bg", BG_WHITE),
-            "highlightthickness": 0,
-            "bd": 0,
-            "relief": "flat",
-            "cursor": kwargs.pop("cursor", "hand2"),
-            **kwargs,
-        }
-        super().__init__(parent, **canvas_options)
-        self.bind("<Configure>", self._on_resize)
-        self.bind("<Enter>", self._on_enter)
-        self.bind("<Leave>", self._on_leave)
-        self.bind("<Button-1>", self._on_press)
-        self.bind("<ButtonRelease-1>", self._on_release)
-        self._hovered = False
-        self._draw()
-
-    @staticmethod
-    def _get_colors(variant: str) -> dict[str, str | int]:
-        if variant == "card":
-            return {
-                "normal": BG_CARD,
-                "hover": "#F1F1F2",
-                "disabled": BG_LIGHT,
-                "foreground": TEXT_DARK,
-                "hover_foreground": PRIMARY_COLOR,
-                "disabled_foreground": "#A8A8A8",
-                "outline": BORDER_COLOR,
-                "hover_outline": PRIMARY_COLOR,
-                "outline_width": 1,
-            }
-        return {
-            "normal": PRIMARY_COLOR,
-            "hover": HOVER_COLOR,
-            "disabled": BG_LIGHT,
-            "foreground": TEXT_WHITE,
-            "hover_foreground": TEXT_WHITE,
-            "disabled_foreground": "#A8A8A8",
-            "outline": PRIMARY_COLOR,
-            "hover_outline": HOVER_COLOR,
-            "outline_width": 0,
-        }
-
-    def _draw(self) -> None:
-        width = max(1, self.winfo_width())
-        height = max(1, self.winfo_height())
-        if width <= 1:
-            width = int(self.cget("width"))
-        if height <= 1:
-            height = int(self.cget("height"))
-        if self._disabled:
-            fill = self._colors["disabled"]
-            foreground = self._colors["disabled_foreground"]
-            outline = self._colors["outline"]
-        elif self._hovered or self._pressed:
-            fill = self._colors["hover"]
-            foreground = self._colors["hover_foreground"]
-            outline = self._colors["hover_outline"]
-        else:
-            fill = self._colors["normal"]
-            foreground = self._colors["foreground"]
-            outline = self._colors["outline"]
-        _rounded_shape(
-            self, width, height, self._radius, str(fill), str(outline),
-            int(self._colors["outline_width"]),
-        )
-        self.delete("button-label")
-        self.create_text(
-            width // 2, height // 2, text=self._text, fill=str(foreground),
-            font=self._font, tags="button-label", anchor="center",
-        )
-
-    def _on_resize(self, _event: tk.Event) -> None:
-        self._draw()
-
-    def _on_enter(self, _event: tk.Event) -> None:
-        if not self._disabled:
-            self._hovered = True
-            self._draw()
-
-    def _on_leave(self, _event: tk.Event) -> None:
-        self._hovered = False
-        self._pressed = False
-        self._draw()
-
-    def _on_press(self, _event: tk.Event) -> None:
-        if not self._disabled:
-            self._pressed = True
-            self._draw()
-
-    def _on_release(self, _event: tk.Event) -> None:
-        was_pressed = self._pressed
-        self._pressed = False
-        self._draw()
-        if was_pressed and self._hovered and not self._disabled and self._command:
-            self._command()
-
-    def configure(self, cnf: dict[str, object] | None = None, **kwargs: object):
-        """Aceita a mesma API de estado/texto usada pelos widgets ttk."""
-        options: dict[str, object] = {}
-        if cnf:
-            options.update(cnf)
-        options.update(kwargs)
-        if "text" in options:
-            self._text = str(options.pop("text"))
-        if "command" in options:
-            self._command = options.pop("command")  # type: ignore[assignment]
-        if "state" in options:
-            state = str(options.pop("state"))
-            self._disabled = state == "disabled"
-            self._hovered = False if self._disabled else self._hovered
-        result = super().configure(**options)
-        self._draw()
-        return result
-
-    config = configure
-
-
-class RoundedText(_FrameBase):
-    """Área de texto sobre um fundo Canvas com borda e cantos arredondados."""
-
-    def __init__(self, parent: tk.Misc, **text_options: object) -> None:
-        if tk is None:
-            raise RuntimeError("Tk não está disponível neste ambiente")
-        super().__init__(parent, bg=BG_WHITE, highlightthickness=0, bd=0)
-        self.canvas = tk.Canvas(
-            self, bg=BG_WHITE, highlightthickness=0, bd=0, relief="flat"
-        )
-        self.canvas.pack(fill="both", expand=True)
-        self.text = tk.Text(
-            self,
-            bg=BG_LIGHT,
-            fg=TEXT_DARK,
-            insertbackground=TEXT_DARK,
-            relief="flat",
-            borderwidth=0,
-            bd=0,
-            highlightthickness=0,
-            **text_options,
-        )
-        self.text.place(x=4, y=4, relwidth=1, relheight=1, width=-8, height=-8)
-        self.bind("<Configure>", self._on_resize)
-        self.canvas.bind("<Configure>", self._on_resize)
-        self._draw()
-
-    def _on_resize(self, _event: tk.Event | None = None) -> None:
-        width = max(1, self.winfo_width())
-        height = max(1, self.winfo_height())
-        _rounded_shape(self.canvas, width, height, 12, BG_LIGHT, BORDER_COLOR, 1)
-
-    def _draw(self) -> None:
-        self.after_idle(self._on_resize)
-
-    def configure(self, cnf: dict[str, object] | None = None, **kwargs: object):
-        """Encaminha opções de texto para o tk.Text interno."""
-        if cnf:
-            kwargs = {**cnf, **kwargs}
-        return self.text.configure(**kwargs)
-
-    config = configure
-
-    def cget(self, key: str):
-        return self.text.cget(key)
-
-    def __getattr__(self, name: str):
-        # Mantém a API de Text (insert/delete/see/yview etc.) para a aplicação.
-        text = self.__dict__.get("text")
-        if text is not None:
-            return getattr(text, name)
-        raise AttributeError(name)
-
-
-def _creation_flags() -> int:
-    """Retorna flags que impedem uma janela de console no Windows."""
-    creationflags = 0
-    if platform.system() == "Windows":
-        creationflags = subprocess.CREATE_NO_WINDOW
-    return creationflags
-
-
 
 def _ensure_admin() -> None:
     """Reinicia o programa com privilégios de administrador no Windows."""
@@ -338,7 +88,6 @@ def _run_command_capture(command: list[str]) -> str:
             text=True,
             timeout=30,
             check=False,
-            creationflags=_creation_flags(),
         )
         output = (result.stdout or "") + (result.stderr or "")
         return output.strip() or "Comando executado sem saída."
@@ -368,7 +117,6 @@ def _clear_print_queue() -> str:
                     timeout=15,
                     check=False,
                     shell=True,
-                    creationflags=_creation_flags(),
                 )
             else:
                 result = subprocess.run(
@@ -377,7 +125,6 @@ def _clear_print_queue() -> str:
                     text=True,
                     timeout=15,
                     check=False,
-                    creationflags=_creation_flags(),
                 )
             output_lines.append(f"> {' '.join(command)}")
             output_lines.append((result.stdout or result.stderr or "OK").strip())
@@ -427,9 +174,9 @@ class SystemDiagnosticsApp:
             self.commands_frame,
         )
 
-        self._buttons: dict[str, list[RoundedButton]] = {}
-        self._button_labels: dict[RoundedButton, str] = {}
-        self._outputs: dict[str, RoundedText] = {}
+        self._buttons: dict[str, list[ttk.Button]] = {}
+        self._button_labels: dict[ttk.Button, str] = {}
+        self._outputs: dict[str, tk.Text] = {}
         self._statuses: dict[str, tk.Label] = {}
         self._result_queue: queue.Queue[tuple[str, str | None]] = queue.Queue()
         self._command_result_queue: queue.Queue[tuple[str, str | None]] = queue.Queue()
@@ -530,10 +277,10 @@ class SystemDiagnosticsApp:
             font=("Segoe UI", 16, "bold"),
         ).pack(pady=(0, 24))
         definitions = [
-            ("Ferramentas", lambda: self._show_frame(self.tools_frame)),
-            ("Impressora", lambda: self._show_frame(self.printer_frame)),
-            ("Arquivos Úteis", lambda: self._show_frame(self.files_frame)),
-            ("Outros Comandos", lambda: self._show_frame(self.commands_frame)),
+            ("🔧  Ferramentas", lambda: self._show_frame(self.tools_frame)),
+            ("🖨️  Impressora", lambda: self._show_frame(self.printer_frame)),
+            ("📁  Arquivos Úteis", lambda: self._show_frame(self.files_frame)),
+            ("⚡  Outros Comandos", lambda: self._show_frame(self.commands_frame)),
         ]
         for label, action in definitions:
             shadow = tk.Frame(content, bg=SHADOW_COLOR)
@@ -593,7 +340,7 @@ class SystemDiagnosticsApp:
         sidebar.pack_propagate(False)
         actions = tk.Frame(sidebar, bg=BG_LIGHT, padx=12, pady=12)
         actions.pack(fill="both", expand=True)
-        buttons: list[RoundedButton] = []
+        buttons: list[ttk.Button] = []
         for label, action in definitions:
             button = self._make_button(actions, label, action)
             button.pack(fill="x", pady=3)
@@ -634,15 +381,14 @@ class SystemDiagnosticsApp:
         label: str,
         action: Action,
         style_name: str = "Rounded.TButton",
-    ) -> RoundedButton:
-        """Cria todos os botões da interface com desenho Canvas real."""
-        variant = "card" if style_name == "Card.TButton" else "primary"
-        return RoundedButton(
+    ) -> ttk.Button:
+        """Cria um botão ttk sem canvas sobreposto ou widgets concorrentes."""
+        return ttk.Button(
             parent,
             text=label,
             command=action,
-            variant=variant,
-            height=52 if variant == "card" else 36,
+            width=22,
+            style=style_name,
             cursor="hand2",
         )
 
@@ -677,18 +423,25 @@ class SystemDiagnosticsApp:
             row = 1
         results_frame.grid_rowconfigure(row, weight=1)
         results_frame.grid_columnconfigure(0, weight=1)
-        output = RoundedText(
-            results_frame,
+        output_frame = ttk.Frame(results_frame, style="Output.TFrame", padding=1)
+        output_frame.grid(row=row, column=0, sticky="nsew")
+        output = tk.Text(
+            output_frame,
             wrap="word",
+            bg=BG_WHITE,
+            fg=TEXT_DARK,
+            insertbackground=TEXT_DARK,
             font=("Consolas", 10),
+            relief="flat",
+            borderwidth=0,
+            bd=0,
+            highlightthickness=0,
             padx=10,
             pady=10,
             state="disabled",
             selectbackground=PRIMARY_COLOR,
             selectforeground=TEXT_WHITE,
         )
-        output.grid(row=row, column=0, sticky="nsew")
-        output_frame = output
         scrollbar = tk.Scrollbar(
             results_frame,
             orient="vertical",
@@ -699,6 +452,7 @@ class SystemDiagnosticsApp:
             borderwidth=0,
         )
         output.configure(yscrollcommand=scrollbar.set)
+        output.pack(fill="both", expand=True)
         scrollbar.grid(row=row, column=1, sticky="ns")
         self._outputs[screen] = output
         if with_progress:
@@ -965,7 +719,7 @@ class SystemDiagnosticsApp:
         if platform.system() != "Windows":
             self._queue_command_output("Disponível apenas no Windows")
             return
-        subprocess.Popen(["explorer", self.PRINTERS_COMMAND], creationflags=_creation_flags())
+        subprocess.Popen(["explorer", self.PRINTERS_COMMAND])
         self._queue_command_output("Abrindo pasta de Impressoras...")
 
     def _clear_printer_queue(self) -> None:
@@ -998,7 +752,7 @@ class SystemDiagnosticsApp:
         if platform.system() != "Windows":
             self._queue_command_output("Disponível apenas no Windows")
             return
-        subprocess.Popen(["msconfig"], creationflags=_creation_flags())
+        subprocess.Popen(["msconfig"])
         self._queue_command_output("Abrindo MSCONFIG...")
 
     # ---- Aba Arquivos Úteis ----------------------------------------------
@@ -1072,7 +826,7 @@ class SystemDiagnosticsApp:
         self._queue_command_output(f"Download concluído: {destination}")
         self._queue_command_output(f"SHA-256: {sha256}")
         if platform.system() == "Windows":
-            subprocess.Popen(["explorer", downloads_path], creationflags=_creation_flags())
+            subprocess.Popen(["explorer", downloads_path])
 
 
 _ICON_B64 = (
