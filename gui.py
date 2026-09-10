@@ -38,25 +38,7 @@ from modules.speedtest import display_speed_test
 from modules.temp_cleaner import display_temp_cleaner
 from modules.system_info import collect_system_info, display_system_info
 from modules.security import calculate_sha256, log_audit, validate_url
-
-# Paleta Anota AI.
-PRIMARY_COLOR = "#EA1D2F"
-BG_WHITE = "#FFFFFF"
-BG_LIGHT = "#F7F7F8"
-BG_CARD = "#FAFAFA"
-SHADOW_COLOR = "#E0E0E0"
-TEXT_DARK = "#3F3E3E"
-TEXT_WHITE = "#FFFFFF"
-ACCENT_GREEN = "#2E7D32"
-HOVER_COLOR = "#C41523"
-BORDER_COLOR = "#E8E8E8"
-
-# Aliases usados pela saída da aplicação.
-SECONDARY_COLOR = TEXT_WHITE
-RESULT_TEXT_COLOR = TEXT_DARK
-POSITIVE_COLOR = ACCENT_GREEN
-NEGATIVE_COLOR = PRIMARY_COLOR
-WINDOW_TITLE = "Diagnóstico do Sistema — Anota AI"
+from modules.theme import *
 
 Action = Callable[[], None]
 Section = tuple[str, Action]
@@ -202,7 +184,7 @@ class SystemDiagnosticsApp:
             "Rounded.TButton",
             background=PRIMARY_COLOR,
             foreground=TEXT_WHITE,
-            font=("Segoe UI", 9, "bold"),
+            font=FONT_BUTTON,
             borderwidth=0,
             focusthickness=0,
             padding=(12, 8),
@@ -217,7 +199,7 @@ class SystemDiagnosticsApp:
             "Card.TButton",
             background=BG_CARD,
             foreground=TEXT_DARK,
-            font=("Segoe UI", 11, "bold"),
+            font=FONT_CARD,
             borderwidth=1,
             bordercolor=BORDER_COLOR,
             focusthickness=0,
@@ -248,7 +230,7 @@ class SystemDiagnosticsApp:
         parent: tk.Misc, title_text: str
     ) -> tuple[tk.Frame, tk.Frame]:
         """Cria o cabeçalho vermelho e a área de conteúdo compartilhada."""
-        header = tk.Frame(parent, bg=PRIMARY_COLOR, height=70)
+        header = tk.Frame(parent, bg=PRIMARY_COLOR, height=HEADER_HEIGHT)
         header.pack(fill="x")
         header.pack_propagate(False)
         tk.Label(
@@ -257,7 +239,7 @@ class SystemDiagnosticsApp:
             bg=PRIMARY_COLOR,
             fg=TEXT_WHITE,
             anchor="w",
-            font=("Arial", 14, "bold"),
+            font=FONT_TITLE,
             padx=20,
         ).pack(fill="both", expand=True)
         body = tk.Frame(parent, bg=BG_WHITE)
@@ -267,14 +249,19 @@ class SystemDiagnosticsApp:
     def _build_initial_frame(self) -> None:
         """Monta a tela inicial com somente os quatro atalhos de abas."""
         _, body = self._build_screen_shell(self.initial_frame, WINDOW_TITLE)
-        content = tk.Frame(body, bg=BG_WHITE, padx=40, pady=35)
+        content = tk.Frame(
+            body,
+            bg=BG_WHITE,
+            padx=PADDING_CONTENT[0],
+            pady=PADDING_CONTENT[1],
+        )
         content.pack(fill="both", expand=True)
         tk.Label(
             content,
             text="Selecione uma categoria",
             bg=BG_WHITE,
             fg=TEXT_DARK,
-            font=("Segoe UI", 16, "bold"),
+            font=FONT_HEADING,
         ).pack(pady=(0, 24))
         definitions = [
             ("🔧  Ferramentas", lambda: self._show_frame(self.tools_frame)),
@@ -286,7 +273,7 @@ class SystemDiagnosticsApp:
             shadow = tk.Frame(content, bg=SHADOW_COLOR)
             shadow.pack(fill="x", pady=6)
             button = self._make_button(shadow, label, action, style_name="Card.TButton")
-            button.pack(fill="x", padx=2, pady=(0, 2))
+            button.pack(fill="x", padx=PADX_BUTTONS, pady=(0, PADY_BUTTONS))
 
     def _build_tools_frame(self) -> None:
         _, body = self._build_screen_shell(self.tools_frame, "Ferramentas — Anota AI")
@@ -335,10 +322,15 @@ class SystemDiagnosticsApp:
         with_progress: bool = False,
     ) -> None:
         """Cria a composição horizontal: botões à esquerda e terminal à direita."""
-        sidebar = tk.Frame(body, bg=BG_LIGHT, width=220)
+        sidebar = tk.Frame(body, bg=BG_LIGHT, width=SIDEBAR_WIDTH)
         sidebar.pack(side="left", fill="y")
         sidebar.pack_propagate(False)
-        actions = tk.Frame(sidebar, bg=BG_LIGHT, padx=12, pady=12)
+        actions = tk.Frame(
+            sidebar,
+            bg=BG_LIGHT,
+            padx=PADX_SIDEBAR,
+            pady=PADY_SIDEBAR,
+        )
         actions.pack(fill="both", expand=True)
         buttons: list[ttk.Button] = []
         for label, action in definitions:
@@ -357,7 +349,7 @@ class SystemDiagnosticsApp:
             bg=BG_LIGHT,
             fg=ACCENT_GREEN,
             anchor="w",
-            font=("Segoe UI", 9, "bold"),
+            font=FONT_STATUS,
         )
         status.pack(fill="x", pady=(0, 7))
         self._statuses[screen] = status
@@ -393,7 +385,12 @@ class SystemDiagnosticsApp:
         )
 
     def _build_results(self, body: tk.Frame, screen: str, with_progress: bool) -> None:
-        results_frame = tk.Frame(body, bg=BG_WHITE, padx=12, pady=12)
+        results_frame = tk.Frame(
+            body,
+            bg=BG_WHITE,
+            padx=PADDING_BODY[0],
+            pady=PADDING_BODY[1],
+        )
         results_frame.pack(side="left", fill="both", expand=True)
         row = 0
         progress_frame = None
@@ -409,7 +406,7 @@ class SystemDiagnosticsApp:
                 bg=BG_WHITE,
                 fg=TEXT_DARK,
                 anchor="w",
-                font=("Segoe UI", 9, "bold"),
+                font=FONT_STATUS,
             )
             progress_label.grid(row=0, column=0, sticky="ew", pady=(0, 5))
             progress_bar = ttk.Progressbar(
@@ -431,7 +428,7 @@ class SystemDiagnosticsApp:
             bg=BG_WHITE,
             fg=TEXT_DARK,
             insertbackground=TEXT_DARK,
-            font=("Consolas", 10),
+            font=FONT_TERMINAL,
             relief="flat",
             borderwidth=0,
             bd=0,
