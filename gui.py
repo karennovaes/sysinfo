@@ -42,12 +42,14 @@ from modules.security import calculate_sha256, log_audit, validate_url
 # Paleta Anota AI.
 PRIMARY_COLOR = "#EA1D2F"
 BG_WHITE = "#FFFFFF"
-BG_LIGHT = "#F5F5F5"
+BG_LIGHT = "#F7F7F8"
+BG_CARD = "#FAFAFA"
+SHADOW_COLOR = "#E0E0E0"
 TEXT_DARK = "#3F3E3E"
 TEXT_WHITE = "#FFFFFF"
 ACCENT_GREEN = "#2E7D32"
 HOVER_COLOR = "#C41523"
-BORDER_COLOR = "#E0E0E0"
+BORDER_COLOR = "#E8E8E8"
 
 # Aliases usados pela saída da aplicação.
 SECONDARY_COLOR = TEXT_WHITE
@@ -59,6 +61,15 @@ WINDOW_TITLE = "Diagnóstico do Sistema — Anota AI"
 Action = Callable[[], None]
 Section = tuple[str, Action]
 ANSI_RE = re.compile(r"\x1b\[([0-9;]*)m")
+
+
+def _creation_flags() -> int:
+    """Retorna flags que impedem uma janela de console no Windows."""
+    creationflags = 0
+    if platform.system() == "Windows":
+        creationflags = subprocess.CREATE_NO_WINDOW
+    return creationflags
+
 
 
 def _ensure_admin() -> None:
@@ -80,7 +91,12 @@ def _run_command_capture(command: list[str]) -> str:
     """Executa um comando e retorna stdout+stderr como string."""
     try:
         result = subprocess.run(
-            command, capture_output=True, text=True, timeout=30, check=False
+            command,
+            capture_output=True,
+            text=True,
+            timeout=30,
+            check=False,
+            creationflags=_creation_flags(),
         )
         output = (result.stdout or "") + (result.stderr or "")
         return output.strip() or "Comando executado sem saída."
@@ -110,6 +126,7 @@ def _clear_print_queue() -> str:
                     timeout=15,
                     check=False,
                     shell=True,
+                    creationflags=_creation_flags(),
                 )
             else:
                 result = subprocess.run(
@@ -118,6 +135,7 @@ def _clear_print_queue() -> str:
                     text=True,
                     timeout=15,
                     check=False,
+                    creationflags=_creation_flags(),
                 )
             output_lines.append(f"> {' '.join(command)}")
             output_lines.append((result.stdout or result.stderr or "OK").strip())
@@ -150,6 +168,7 @@ class SystemDiagnosticsApp:
         self.root.minsize(500, 400)
         self.root.resizable(True, True)
         self.root.configure(bg=BG_WHITE)
+        self._configure_styles()
 
         self.container = tk.Frame(self.root, bg=BG_WHITE)
         self.container.pack(fill="both", expand=True)
@@ -166,8 +185,8 @@ class SystemDiagnosticsApp:
             self.commands_frame,
         )
 
-        self._buttons: dict[str, list[tk.Button]] = {}
-        self._button_labels: dict[tk.Button, str] = {}
+        self._buttons: dict[str, list[ttk.Button]] = {}
+        self._button_labels: dict[ttk.Button, str] = {}
         self._outputs: dict[str, tk.Text] = {}
         self._statuses: dict[str, tk.Label] = {}
         self._result_queue: queue.Queue[tuple[str, str | None]] = queue.Queue()
@@ -185,6 +204,55 @@ class SystemDiagnosticsApp:
         self._build_files_frame()
         self._build_commands_frame()
         self.initial_frame.pack(fill="both", expand=True)
+
+    def _configure_styles(self) -> None:
+        """Configura o tema claro e os estilos compartilhados da interface."""
+        style = ttk.Style(self.root)
+        style.theme_use("clam")
+        style.configure(
+            "Rounded.TButton",
+            background=PRIMARY_COLOR,
+            foreground=TEXT_WHITE,
+            font=("Segoe UI", 9, "bold"),
+            borderwidth=0,
+            focusthickness=0,
+            padding=(12, 8),
+            relief="flat",
+        )
+        style.map(
+            "Rounded.TButton",
+            background=[("disabled", BG_LIGHT), ("pressed", HOVER_COLOR), ("active", HOVER_COLOR)],
+            foreground=[("disabled", "#A8A8A8"), ("!disabled", TEXT_WHITE)],
+        )
+        style.configure(
+            "Card.TButton",
+            background=BG_CARD,
+            foreground=TEXT_DARK,
+            font=("Segoe UI", 11, "bold"),
+            borderwidth=1,
+            bordercolor=BORDER_COLOR,
+            focusthickness=0,
+            padding=(20, 15),
+            relief="solid",
+        )
+        style.map(
+            "Card.TButton",
+            background=[("pressed", "#F1F1F2"), ("active", BG_CARD)],
+            foreground=[("pressed", HOVER_COLOR), ("active", PRIMARY_COLOR)],
+            bordercolor=[("pressed", HOVER_COLOR), ("active", PRIMARY_COLOR)],
+        )
+        style.configure(
+            "Output.TFrame",
+            background=BORDER_COLOR,
+        )
+        style.configure(
+            "Anota.Horizontal.TProgressbar",
+            troughcolor=BG_LIGHT,
+            background=PRIMARY_COLOR,
+            lightcolor=PRIMARY_COLOR,
+            darkcolor=PRIMARY_COLOR,
+            bordercolor=BORDER_COLOR,
+        )
 
     @staticmethod
     def _build_screen_shell(
@@ -220,15 +288,16 @@ class SystemDiagnosticsApp:
             font=("Segoe UI", 16, "bold"),
         ).pack(pady=(0, 24))
         definitions = [
-            ("Ferramentas", lambda: self._show_frame(self.tools_frame)),
-            ("Impressora", lambda: self._show_frame(self.printer_frame)),
-            ("Arquivos Úteis", lambda: self._show_frame(self.files_frame)),
-            ("Outros Comandos", lambda: self._show_frame(self.commands_frame)),
+            ("🔧  Ferramentas", lambda: self._show_frame(self.tools_frame)),
+            ("🖨️  Impressora", lambda: self._show_frame(self.printer_frame)),
+            ("📁  Arquivos Úteis", lambda: self._show_frame(self.files_frame)),
+            ("⚡  Outros Comandos", lambda: self._show_frame(self.commands_frame)),
         ]
         for label, action in definitions:
-            button = self._make_button(content, label, action)
-            button.configure(width=28, pady=12, font=("Segoe UI", 11, "bold"))
-            button.pack(fill="x", pady=5)
+            shadow = tk.Frame(content, bg=SHADOW_COLOR)
+            shadow.pack(fill="x", pady=6)
+            button = self._make_button(shadow, label, action, style_name="Card.TButton")
+            button.pack(fill="x", padx=2, pady=(0, 2))
 
     def _build_tools_frame(self) -> None:
         _, body = self._build_screen_shell(self.tools_frame, "Ferramentas — Anota AI")
@@ -282,7 +351,7 @@ class SystemDiagnosticsApp:
         sidebar.pack_propagate(False)
         actions = tk.Frame(sidebar, bg=BG_LIGHT, padx=12, pady=12)
         actions.pack(fill="both", expand=True)
-        buttons: list[tk.Button] = []
+        buttons: list[ttk.Button] = []
         for label, action in definitions:
             button = self._make_button(actions, label, action)
             button.pack(fill="x", pady=3)
@@ -318,37 +387,21 @@ class SystemDiagnosticsApp:
         self._button_labels[back_button] = "Voltar"
 
     @staticmethod
-    def _make_button(parent: tk.Misc, label: str, action: Action) -> tk.Button:
-        button = tk.Button(
+    def _make_button(
+        parent: tk.Misc,
+        label: str,
+        action: Action,
+        style_name: str = "Rounded.TButton",
+    ) -> ttk.Button:
+        """Cria um botão ttk sem canvas sobreposto ou widgets concorrentes."""
+        return ttk.Button(
             parent,
             text=label,
             command=action,
             width=22,
-            padx=12,
-            pady=8,
-            bg=PRIMARY_COLOR,
-            fg=TEXT_WHITE,
-            activebackground=HOVER_COLOR,
-            activeforeground=TEXT_WHITE,
-            font=("Segoe UI", 9, "bold"),
-            borderwidth=0,
-            relief="flat",
-            highlightthickness=0,
+            style=style_name,
             cursor="hand2",
-            anchor="center",
         )
-
-        def on_enter(event: tk.Event) -> None:
-            if event.widget.cget("state") != tk.DISABLED:
-                event.widget.configure(bg=HOVER_COLOR)
-
-        def on_leave(event: tk.Event) -> None:
-            if event.widget.cget("state") != tk.DISABLED:
-                event.widget.configure(bg=PRIMARY_COLOR)
-
-        button.bind("<Enter>", on_enter)
-        button.bind("<Leave>", on_leave)
-        return button
 
     def _build_results(self, body: tk.Frame, screen: str, with_progress: bool) -> None:
         results_frame = tk.Frame(body, bg=BG_WHITE, padx=12, pady=12)
@@ -370,15 +423,6 @@ class SystemDiagnosticsApp:
                 font=("Segoe UI", 9, "bold"),
             )
             progress_label.grid(row=0, column=0, sticky="ew", pady=(0, 5))
-            style = ttk.Style(self.root)
-            style.configure(
-                "Anota.Horizontal.TProgressbar",
-                troughcolor=BG_LIGHT,
-                background=PRIMARY_COLOR,
-                lightcolor=PRIMARY_COLOR,
-                darkcolor=PRIMARY_COLOR,
-                bordercolor=BORDER_COLOR,
-            )
             progress_bar = ttk.Progressbar(
                 progress_frame,
                 orient="horizontal",
@@ -390,18 +434,19 @@ class SystemDiagnosticsApp:
             row = 1
         results_frame.grid_rowconfigure(row, weight=1)
         results_frame.grid_columnconfigure(0, weight=1)
+        output_frame = ttk.Frame(results_frame, style="Output.TFrame", padding=1)
+        output_frame.grid(row=row, column=0, sticky="nsew")
         output = tk.Text(
-            results_frame,
+            output_frame,
             wrap="word",
             bg=BG_WHITE,
             fg=TEXT_DARK,
             insertbackground=TEXT_DARK,
             font=("Consolas", 10),
-            relief="solid",
-            borderwidth=1,
-            bd=1,
-            highlightbackground=BORDER_COLOR,
-            highlightcolor=BORDER_COLOR,
+            relief="flat",
+            borderwidth=0,
+            bd=0,
+            highlightthickness=0,
             padx=10,
             pady=10,
             state="disabled",
@@ -418,9 +463,11 @@ class SystemDiagnosticsApp:
             borderwidth=0,
         )
         output.configure(yscrollcommand=scrollbar.set)
-        output.grid(row=row, column=0, sticky="nsew")
+        output.pack(fill="both", expand=True)
         scrollbar.grid(row=row, column=1, sticky="ns")
         self._outputs[screen] = output
+        if with_progress:
+            self._output_frame = output_frame
         if with_progress:
             self._progress_frame = progress_frame
             self._progress_label = progress_label
@@ -474,7 +521,7 @@ class SystemDiagnosticsApp:
         output.configure(state="normal")
         output.delete("1.0", "end")
         output.configure(state="disabled")
-        output.grid_remove()
+        self._output_frame.grid_remove()
         self._output_scrollbar.grid_remove()
         self._progress_total = total
         self._progress_current = 0
@@ -490,7 +537,7 @@ class SystemDiagnosticsApp:
     def _hide_progress(self) -> None:
         self._progress_bar.stop()
         self._progress_frame.grid_remove()
-        self._outputs["tools"].grid(row=1, column=0, sticky="nsew")
+        self._output_frame.grid(row=1, column=0, sticky="nsew")
         self._output_scrollbar.grid(row=1, column=1, sticky="ns")
 
     def _progress_name(self, section_title: str) -> str:
@@ -683,7 +730,7 @@ class SystemDiagnosticsApp:
         if platform.system() != "Windows":
             self._queue_command_output("Disponível apenas no Windows")
             return
-        subprocess.Popen(["explorer", self.PRINTERS_COMMAND])
+        subprocess.Popen(["explorer", self.PRINTERS_COMMAND], creationflags=_creation_flags())
         self._queue_command_output("Abrindo pasta de Impressoras...")
 
     def _clear_printer_queue(self) -> None:
@@ -716,7 +763,7 @@ class SystemDiagnosticsApp:
         if platform.system() != "Windows":
             self._queue_command_output("Disponível apenas no Windows")
             return
-        subprocess.Popen(["msconfig"])
+        subprocess.Popen(["msconfig"], creationflags=_creation_flags())
         self._queue_command_output("Abrindo MSCONFIG...")
 
     # ---- Aba Arquivos Úteis ----------------------------------------------
@@ -790,7 +837,7 @@ class SystemDiagnosticsApp:
         self._queue_command_output(f"Download concluído: {destination}")
         self._queue_command_output(f"SHA-256: {sha256}")
         if platform.system() == "Windows":
-            subprocess.Popen(["explorer", downloads_path])
+            subprocess.Popen(["explorer", downloads_path], creationflags=_creation_flags())
 
 
 _ICON_B64 = (
