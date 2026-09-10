@@ -27,7 +27,7 @@ FONT_TERMINAL = ("Consolas", 10)
 FONT_STATUS = ("Segoe UI", 9, "bold")
 
 # Estilos da tela principal.
-WINDOW_TITLE = "Diagnóstico do Sistema — Anota AI"
+WINDOW_TITLE = "Suporte Tools"
 HEADER_HEIGHT = 70
 SIDEBAR_WIDTH = 220
 PADDING_BODY = (12, 12)
