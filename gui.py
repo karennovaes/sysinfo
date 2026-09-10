@@ -23,7 +23,7 @@ except ImportError:  # Permite usar as rotinas não gráficas em ambientes sem T
     ttk = None
 
 # Permite importar as rotinas em ambientes sem Tk/display.
-_CanvasBase = tk.Canvas if tk is not None else object
+_FrameBase = tk.Frame if tk is not None else object
 import urllib.request
 from collections.abc import Callable
 from contextlib import redirect_stdout
@@ -90,8 +90,13 @@ def _rounded_shape(
     )
 
 
-class RoundedButton(_CanvasBase):
-    """Botão Canvas para as ações internas, com hover e estado disabled."""
+class RoundedButton(_FrameBase):
+    """Botão com Canvas interno, hover e estado disabled.
+
+    O ``Frame`` é o widget que participa do ``pack(fill="x")``. O Canvas
+    ocupa todo o Frame com ``place`` e, assim, acompanha automaticamente a
+    largura disponível do sidebar.
+    """
 
     def __init__(
         self,
@@ -113,39 +118,43 @@ class RoundedButton(_CanvasBase):
         self._hovered = False
         self._pressed = False
         self._font = kwargs.pop("font", FONT_BUTTON)
-        canvas_options = {
-            "width": width,
-            "height": height,
-            "bg": kwargs.pop("bg", BG_LIGHT),
-            "highlightthickness": 0,
-            "bd": 0,
-            "relief": "flat",
-            "cursor": kwargs.pop("cursor", "hand2"),
+        background = kwargs.pop("bg", BG_LIGHT)
+        cursor = kwargs.pop("cursor", "hand2")
+
+        super().__init__(
+            parent,
+            width=width,
+            height=height,
+            bg=background,
+            highlightthickness=0,
+            bd=0,
+            relief="flat",
+            cursor=cursor,
             **kwargs,
-        }
-        super().__init__(parent, **canvas_options)
-        self.bind("<Configure>", self._on_resize)
-        self.bind("<Enter>", self._on_enter)
-        self.bind("<Leave>", self._on_leave)
-        self.bind("<Button-1>", self._on_press)
-        self.bind("<ButtonRelease-1>", self._on_release)
+        )
+        self.canvas = tk.Canvas(
+            self,
+            bg=background,
+            highlightthickness=0,
+            bd=0,
+            relief="flat",
+            cursor=cursor,
+        )
+        self.canvas.place(x=0, y=0, relwidth=1, relheight=1)
+        self.canvas.bind("<Configure>", self._on_resize)
+        self.canvas.bind("<Enter>", self._on_enter)
+        self.canvas.bind("<Leave>", self._on_leave)
+        self.canvas.bind("<Button-1>", self._on_press)
+        self.canvas.bind("<ButtonRelease-1>", self._on_release)
         self._draw()
 
     def _draw(self) -> None:
-        # Antes do primeiro evento ``<Configure>``, o Canvas pode informar
-        # largura 1. Nesse momento, aproveitamos a largura já calculada do
-        # container; depois do layout, ``winfo_width`` passa a ser a fonte de
-        # verdade e permite que o botão acompanhe o ``pack(fill="x")``.
-        width = self.winfo_width()
+        width = self.canvas.winfo_width()
         if width <= 1:
-            parent_width = self.master.winfo_width()
-            if parent_width > 1:
-                width = parent_width
-            else:
-                width = int(self.cget("width"))
+            width = int(self.cget("width"))
         width = max(1, width)
 
-        height = self.winfo_height()
+        height = self.canvas.winfo_height()
         if height <= 1:
             height = int(self.cget("height"))
         height = max(1, height)
@@ -158,9 +167,9 @@ class RoundedButton(_CanvasBase):
         else:
             fill = PRIMARY_COLOR
             foreground = TEXT_WHITE
-        _rounded_shape(self, width, height, self._radius, fill)
-        self.delete("button-label")
-        self.create_text(
+        _rounded_shape(self.canvas, width, height, self._radius, fill)
+        self.canvas.delete("button-label")
+        self.canvas.create_text(
             width // 2,
             height // 2,
             text=self._text,
