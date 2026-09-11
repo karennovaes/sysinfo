@@ -31,7 +31,7 @@ Layout limpo com botões na lateral esquerda e terminal à direita. Cores da mar
 ### Baixar o executável
 
 1. Acesse a aba **Releases** no GitHub
-2. Baixe o `DiagnosticoSistema-AnotaAI.exe`
+2. Baixe o `SuporteTools-AnotaAI.exe`
 3. Execute — o programa pede permissão de administrador automaticamente
 
 ### Rodar pelo código-fonte
