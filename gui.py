@@ -324,7 +324,6 @@ class SystemDiagnosticsApp:
 
     def _build_program_frame(self) -> None:
         _, body = self._build_screen_shell(self.program_frame, "Programa — Anota AI")
-        self._build_scan_card(body)
         definitions = [
             ("Verificar Processos Ativos", self._check_anota_processes),
             ("Reiniciar Anota AI", self._restart_anota),
@@ -332,12 +331,20 @@ class SystemDiagnosticsApp:
             ("Reparar Atalhos", self._repair_shortcuts),
             ("Baixar Anota AI Desktop", self._download_desktop),
         ]
-        self._build_action_screen(body, "program", definitions)
+        results_frame = self._build_action_screen(body, "program", definitions)
+        self._build_scan_card(results_frame)
 
     def _build_scan_card(self, body: tk.Frame) -> None:
         """Cria o cartão destacado que apresenta o scanner do Anota AI."""
         card = tk.Frame(body, bg=BG_CARD, highlightbackground=BORDER_COLOR, highlightthickness=1)
-        card.pack(fill="x", padx=PADDING_BODY[0], pady=(PADDING_BODY[1], 0))
+        pack_options = {"fill": "x", "pady": (0, 8)}
+        # O conteúdo dos resultados já foi criado. Insere o scanner antes dele
+        # para que o cartão fique no topo sem misturar pack e grid no mesmo
+        # container (o conteúdo usa grid internamente).
+        children = body.winfo_children()
+        if children:
+            pack_options["before"] = children[0]
+        card.pack(**pack_options)
         content = tk.Frame(card, bg=BG_CARD, padx=12, pady=10)
         content.pack(fill="x")
         title_row = tk.Frame(content, bg=BG_CARD)
@@ -395,7 +402,7 @@ class SystemDiagnosticsApp:
         screen: str,
         definitions: list[tuple[str, Action]],
         with_progress: bool = False,
-    ) -> None:
+    ) -> tk.Frame:
         """Cria a composição horizontal: botões à esquerda e terminal à direita."""
         sidebar = tk.Frame(body, bg=BG_LIGHT, width=SIDEBAR_WIDTH)
         sidebar.pack(side="left", fill="y")
@@ -474,7 +481,7 @@ class SystemDiagnosticsApp:
         actions_canvas.configure(scrollregion=actions_canvas.bbox("all"))
         self._buttons[screen] = buttons
 
-        self._build_results(body, screen, with_progress)
+        results_frame = self._build_results(body, screen, with_progress)
         footer = tk.Frame(sidebar, bg=BG_LIGHT, padx=12, pady=10)
         footer.pack(side="bottom", fill="x")
         status = tk.Label(
@@ -500,6 +507,7 @@ class SystemDiagnosticsApp:
         )
         self._buttons[screen].append(back_button)
         self._button_labels[back_button] = "Voltar"
+        return results_frame
 
     @staticmethod
     def _make_button(
@@ -526,7 +534,7 @@ class SystemDiagnosticsApp:
             cursor="hand2",
         )
 
-    def _build_results(self, body: tk.Frame, screen: str, with_progress: bool) -> None:
+    def _build_results(self, body: tk.Frame, screen: str, with_progress: bool) -> tk.Frame:
         results_frame = tk.Frame(
             body,
             bg=BG_WHITE,
@@ -534,12 +542,17 @@ class SystemDiagnosticsApp:
             pady=PADDING_BODY[1],
         )
         results_frame.pack(side="left", fill="both", expand=True)
+        # Mantém o scanner (que usa pack) separado dos widgets de resultados,
+        # que usam grid. Assim o card pode ser inserido no topo depois que a
+        # tela for montada sem conflito entre gerenciadores de geometria.
+        results_content = tk.Frame(results_frame, bg=BG_WHITE)
+        results_content.pack(fill="both", expand=True)
         row = 0
         progress_frame = None
         progress_label = None
         progress_bar = None
         if with_progress:
-            progress_frame = tk.Frame(results_frame, bg=BG_WHITE)
+            progress_frame = tk.Frame(results_content, bg=BG_WHITE)
             progress_frame.grid(row=0, column=0, sticky="ew", pady=(0, 8))
             progress_frame.grid_columnconfigure(0, weight=1)
             progress_label = tk.Label(
@@ -560,9 +573,9 @@ class SystemDiagnosticsApp:
             progress_bar.grid(row=1, column=0, sticky="ew")
             progress_frame.grid_remove()
             row = 1
-        results_frame.grid_rowconfigure(row, weight=1)
-        results_frame.grid_columnconfigure(0, weight=1)
-        output_frame = ttk.Frame(results_frame, style="Output.TFrame", padding=1)
+        results_content.grid_rowconfigure(row, weight=1)
+        results_content.grid_columnconfigure(0, weight=1)
+        output_frame = ttk.Frame(results_content, style="Output.TFrame", padding=1)
         output_frame.grid(row=row, column=0, sticky="nsew")
         output = tk.Text(
             output_frame,
@@ -582,7 +595,7 @@ class SystemDiagnosticsApp:
             selectforeground=TEXT_WHITE,
         )
         scrollbar = tk.Scrollbar(
-            results_frame,
+            results_content,
             orient="vertical",
             command=output.yview,
             troughcolor=BG_LIGHT,
@@ -601,6 +614,7 @@ class SystemDiagnosticsApp:
             self._progress_label = progress_label
             self._progress_bar = progress_bar
             self._output_scrollbar = scrollbar
+        return results_frame
 
     def _show_frame(self, frame: tk.Frame) -> None:
         if self._busy or self._command_busy:
