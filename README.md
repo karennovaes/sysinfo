@@ -1,4 +1,4 @@
-# 🔧 Diagnóstico do Sistema — Anota AI
+# 🔧 SuporteTools— Anota AI
 
 Ferramenta de diagnóstico para suporte técnico remoto. Um único executável que coleta informações do sistema, verifica compatibilidade com os requisitos do Anota AI, sincroniza data/hora, testa internet, limpa temporários e oferece atalhos de suporte.
 
