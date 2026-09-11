@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import os
 import platform
+import re
 import subprocess
 import time
 from pathlib import Path
@@ -14,7 +15,7 @@ import psutil
 
 def _creation_flags() -> int:
     """Evita uma janela de console quando o aplicativo roda no Windows."""
-    return subprocess.CREATE_NO_WINDOW if platform.system() == "Windows" else 0
+    return getattr(subprocess, "CREATE_NO_WINDOW", 0) if platform.system() == "Windows" else 0
 
 
 _EXECUTABLE_NAMES = (
@@ -27,6 +28,128 @@ _EXECUTABLE_NAMES = (
 
 def _normalise_name(value: str) -> str:
     return value.casefold().replace(" ", "").replace("-", "")
+
+
+_ANOTA_NAME_MARKERS = ("anota", "anotaai", "anota ai", "anotaresponde")
+
+
+def _contains_anota_name(value: str) -> bool:
+    """Indica se um nome pertence ao conjunto de nomes do Anota AI."""
+    normalised = value.casefold()
+    return any(marker in normalised for marker in _ANOTA_NAME_MARKERS)
+
+
+def _scan_roots() -> list[Path]:
+    """Monta os diretórios de instalação sem depender de uma unidade fixa."""
+    values = [
+        os.environ.get("PROGRAMFILES(X86)"),
+        os.environ.get("PROGRAMFILES"),
+        os.environ.get("LOCALAPPDATA"),
+        os.environ.get("APPDATA"),
+    ]
+    # Em instalações Windows, estas pastas continuam sendo úteis mesmo quando
+    # o processo foi iniciado por um usuário com variáveis incompletas.
+    values.extend((r"C:\Program Files (x86)", r"C:\Program Files"))
+    roots: list[Path] = []
+    seen: set[str] = set()
+    for value in values:
+        if not value:
+            continue
+        root = Path(value)
+        key = str(root).casefold()
+        if key not in seen:
+            roots.append(root)
+            seen.add(key)
+    return roots
+
+
+def _read_wmic_version(executable: Path) -> str:
+    """Obtém a versão do executável com WMIC, sem abrir uma janela de console."""
+    if platform.system() != "Windows":
+        return "Não disponível neste sistema"
+    escaped_path = str(executable).replace("\\", "\\\\")
+    command = [
+        "wmic",
+        "datafile",
+        "where",
+        f"name='{escaped_path}'",
+        "get",
+        "Version",
+        "/value",
+    ]
+    try:
+        result = subprocess.run(
+            command,
+            capture_output=True,
+            text=True,
+            timeout=15,
+            check=False,
+            creationflags=_creation_flags(),
+        )
+    except (OSError, subprocess.SubprocessError):
+        return "Não informado"
+    output = (result.stdout or "") + "\n" + (result.stderr or "")
+    match = re.search(r"(?im)^\s*Version\s*=\s*([^\r\n]+)", output)
+    if match:
+        return match.group(1).strip()
+    # Algumas versões do WMIC imprimem o cabeçalho e o valor em linhas
+    # separadas, então preservamos esse formato como fallback.
+    lines = [line.strip() for line in output.splitlines() if line.strip()]
+    for index, line in enumerate(lines[:-1]):
+        if line.casefold() == "version" and lines[index + 1]:
+            return lines[index + 1]
+    return "Não informado"
+
+
+def _find_anota_executable(folder: Path) -> Path | None:
+    """Retorna um executável dentro de uma pasta identificada como Anota."""
+    try:
+        candidates = sorted(folder.rglob("*.exe"), key=lambda path: (not _contains_anota_name(path.name), str(path)))
+        return candidates[0] if candidates else None
+    except (OSError, PermissionError):
+        return None
+
+
+def scan_anota_installation() -> tuple[bool, str, str]:
+    """Procura uma instalação do Anota AI em diretórios comuns do Windows.
+
+    O retorno é ``(encontrado, caminho, versão)``. Pastas com nome relacionado
+    ao Anota AI também são consideradas instalações; quando há um executável
+    dentro delas, o caminho retornado é o executável e sua versão é consultada
+    com WMIC.
+    """
+    matching_folder: Path | None = None
+    for root in _scan_roots():
+        if not root.is_dir():
+            continue
+        try:
+            # Aceita também uma raiz que já seja a pasta do aplicativo.
+            # Os diretórios abaixo continuam sendo percorridos normalmente.
+            if _contains_anota_name(root.name):
+                executable = _find_anota_executable(root)
+                if executable is not None:
+                    return True, str(executable), _read_wmic_version(executable)
+                matching_folder = root
+            for current, directories, files in os.walk(root, topdown=True, followlinks=False):
+                current_path = Path(current)
+                # Arquivos executáveis têm prioridade porque permitem mostrar a
+                # versão real instalada no cartão da interface.
+                for filename in files:
+                    candidate = current_path / filename
+                    if candidate.suffix.casefold() == ".exe" and _contains_anota_name(filename):
+                        return True, str(candidate), _read_wmic_version(candidate)
+                for directory in directories:
+                    if _contains_anota_name(directory) and matching_folder is None:
+                        folder = current_path / directory
+                        executable = _find_anota_executable(folder)
+                        if executable is not None:
+                            return True, str(executable), _read_wmic_version(executable)
+                        matching_folder = folder
+        except (OSError, PermissionError):
+            continue
+    if matching_folder is not None:
+        return True, str(matching_folder), "Não informado"
+    return False, "", ""
 
 
 def list_anota_processes() -> list[dict[str, str | int]]:
@@ -166,30 +289,11 @@ def restart_anota() -> str:
 
 
 def installed_version() -> str:
-    """Lê a versão do executável usando a metadata do arquivo no Windows."""
-    executable = find_anota_executable()
-    if executable is None:
+    """Retorna a versão e o caminho encontrados pelo scanner de instalação."""
+    found, path, version = scan_anota_installation()
+    if not found:
         return "Não encontrado"
-    if platform.system() != "Windows":
-        return f"Executável encontrado: {executable} (versão disponível no Windows)"
-    command = (
-        "$item = Get-Item -LiteralPath $args[0]; "
-        "if ($item.VersionInfo.ProductVersion) { $item.VersionInfo.ProductVersion } "
-        "else { 'Não informado' }"
-    )
-    try:
-        result = subprocess.run(
-            ["powershell", "-NoProfile", "-NonInteractive", "-Command", command, str(executable)],
-            capture_output=True,
-            text=True,
-            timeout=15,
-            check=False,
-            creationflags=_creation_flags(),
-        )
-    except (OSError, subprocess.SubprocessError) as exc:
-        return f"Executável encontrado: {executable}\nNão foi possível ler a versão: {exc}"
-    version = next((line.strip() for line in (result.stdout or "").splitlines() if line.strip()), "Não informado")
-    return f"Versão instalada: {version}\nExecutável: {executable}"
+    return f"Versão instalada: {version}\nExecutável ou pasta: {path}"
 
 
 def display_restart_anota() -> None:

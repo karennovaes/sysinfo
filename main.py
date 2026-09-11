@@ -23,7 +23,7 @@ from modules.speedtest import display_speed_test
 from modules.system_info import collect_system_info, display_system_info
 from modules.temp_cleaner import display_temp_cleaner
 
-TITLE = "=== Diagnóstico do Sistema ==="
+TITLE = "=== Suporte Tools ==="
 SEPARATOR = "-" * len(TITLE)
 
 
