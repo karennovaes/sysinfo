@@ -193,6 +193,7 @@ class SystemDiagnosticsApp:
         self._scan_result_queue: queue.Queue[tuple[bool, str, str]] = queue.Queue()
         self._scan_button: ttk.Button | None = None
         self._scan_status: tk.Label | None = None
+        self._run_all_status: tk.Label | None = None
         self._scan_busy = False
         self._busy = False
         self._command_busy = False
@@ -318,9 +319,11 @@ class SystemDiagnosticsApp:
             ("Verificar Antivírus", self._check_antivirus),
             ("Verificar Inicialização", self._check_startup),
             ("Informações do Sistema", self._show_system_info),
-            ("Executar Tudo", self._run_all),
         ]
-        self._build_action_screen(body, "computer", definitions, with_progress=True)
+        results_frame = self._build_action_screen(
+            body, "computer", definitions, with_progress=True
+        )
+        self._build_run_all_card(results_frame)
 
     def _build_program_frame(self) -> None:
         _, body = self._build_screen_shell(self.program_frame, "Programa — Anota AI")
@@ -333,6 +336,44 @@ class SystemDiagnosticsApp:
         ]
         results_frame = self._build_action_screen(body, "program", definitions)
         self._build_scan_card(results_frame)
+
+    def _build_run_all_card(self, body: tk.Frame) -> None:
+        """Cria o cartão destacado para executar o diagnóstico completo."""
+        card = tk.Frame(
+            body,
+            bg=BG_CARD,
+            highlightbackground=BORDER_COLOR,
+            highlightthickness=1,
+        )
+        children = body.winfo_children()
+        card.pack(fill="x", pady=(0, 8), before=children[0])
+        content = tk.Frame(card, bg=BG_CARD, padx=12, pady=10)
+        content.pack(fill="x")
+        title_row = tk.Frame(content, bg=BG_CARD)
+        title_row.pack(fill="x")
+        tk.Label(
+            title_row,
+            text="Executar diagnóstico completo",
+            bg=BG_CARD,
+            fg=TEXT_DARK,
+            font=FONT_CARD,
+            anchor="w",
+        ).pack(side="left", fill="x", expand=True)
+        run_all_button = self._make_button(
+            title_row, "▶ Executar Tudo", self._run_all
+        )
+        run_all_button.pack(side="right")
+        self._run_all_status = tk.Label(
+            content,
+            text="Aguardando execução",
+            bg=BG_CARD,
+            fg=TEXT_DARK,
+            font=FONT_STATUS,
+            anchor="w",
+            justify="left",
+            wraplength=900,
+        )
+        self._run_all_status.pack(fill="x", pady=(8, 0))
 
     def _build_scan_card(self, body: tk.Frame) -> None:
         """Cria o cartão destacado que apresenta o scanner do Anota AI."""
