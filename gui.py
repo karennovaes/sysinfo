@@ -40,6 +40,23 @@ from modules.speedtest import display_speed_test
 from modules.temp_cleaner import display_temp_cleaner
 from modules.system_info import collect_system_info, display_system_info
 from modules.security import calculate_sha256, log_audit, validate_url
+from modules.anota_logs import display_anota_logs
+from modules.anota_process import (
+    display_anota_processes,
+    display_restart_anota,
+    scan_anota_installation,
+)
+from modules.uninstaller import display_uninstall
+from modules.maintenance import (
+    display_antivirus_status,
+    display_repair_shortcut,
+    display_startup_programs,
+)
+from modules.network_tools import (
+    display_anota_connection,
+    display_firewall_status,
+    display_flush_dns,
+)
 from modules.theme import *
 
 Action = Callable[[], None]
@@ -156,16 +173,16 @@ class SystemDiagnosticsApp:
         self.container = tk.Frame(self.root, bg=BG_WHITE)
         self.container.pack(fill="both", expand=True)
         self.initial_frame = tk.Frame(self.container, bg=BG_WHITE)
-        self.tools_frame = tk.Frame(self.container, bg=BG_WHITE)
+        self.computer_frame = tk.Frame(self.container, bg=BG_WHITE)
+        self.program_frame = tk.Frame(self.container, bg=BG_WHITE)
         self.printer_frame = tk.Frame(self.container, bg=BG_WHITE)
-        self.files_frame = tk.Frame(self.container, bg=BG_WHITE)
-        self.commands_frame = tk.Frame(self.container, bg=BG_WHITE)
+        self.network_frame = tk.Frame(self.container, bg=BG_WHITE)
         self._frames = (
             self.initial_frame,
-            self.tools_frame,
+            self.computer_frame,
+            self.program_frame,
             self.printer_frame,
-            self.files_frame,
-            self.commands_frame,
+            self.network_frame,
         )
 
         self._buttons: dict[str, list[ttk.Button]] = {}
@@ -174,6 +191,11 @@ class SystemDiagnosticsApp:
         self._statuses: dict[str, tk.Label] = {}
         self._result_queue: queue.Queue[tuple[str, str | None]] = queue.Queue()
         self._command_result_queue: queue.Queue[tuple[str, str | None]] = queue.Queue()
+        self._scan_result_queue: queue.Queue[tuple[bool, str, str]] = queue.Queue()
+        self._scan_button: ttk.Button | None = None
+        self._scan_status: tk.Label | None = None
+        self._run_all_status: tk.Label | None = None
+        self._scan_busy = False
         self._busy = False
         self._command_busy = False
         self._active_screen = ""
@@ -182,10 +204,10 @@ class SystemDiagnosticsApp:
         self._progress_current = 0
 
         self._build_initial_frame()
-        self._build_tools_frame()
+        self._build_computer_frame()
+        self._build_program_frame()
         self._build_printer_frame()
-        self._build_files_frame()
-        self._build_commands_frame()
+        self._build_network_frame()
         self.initial_frame.pack(fill="both", expand=True)
 
     def _configure_styles(self) -> None:
@@ -259,7 +281,7 @@ class SystemDiagnosticsApp:
         return header, body
 
     def _build_initial_frame(self) -> None:
-        """Monta a tela inicial com somente os quatro atalhos de abas."""
+        """Monta a tela inicial com os quatro atalhos de categorias."""
         _, body = self._build_screen_shell(self.initial_frame, WINDOW_TITLE)
         content = tk.Frame(
             body,
@@ -276,10 +298,10 @@ class SystemDiagnosticsApp:
             font=FONT_HEADING,
         ).pack(pady=(0, 24))
         definitions = [
-            ("🔧  Ferramentas", lambda: self._show_frame(self.tools_frame)),
+            ("💻  Computador", lambda: self._show_frame(self.computer_frame)),
+            ("🧩  Programa", lambda: self._show_frame(self.program_frame)),
+            ("🌐  Rede", lambda: self._show_frame(self.network_frame)),
             ("🖨️  Impressora", lambda: self._show_frame(self.printer_frame)),
-            ("📁  Arquivos Úteis", lambda: self._show_frame(self.files_frame)),
-            ("⚡  Outros Comandos", lambda: self._show_frame(self.commands_frame)),
         ]
         for label, action in definitions:
             shadow = tk.Frame(content, bg=SHADOW_COLOR)
@@ -287,17 +309,112 @@ class SystemDiagnosticsApp:
             button = self._make_button(shadow, label, action, style_name="Card.TButton")
             button.pack(fill="x", padx=PADX_BUTTONS, pady=(0, PADY_BUTTONS))
 
-    def _build_tools_frame(self) -> None:
-        _, body = self._build_screen_shell(self.tools_frame, "Ferramentas — Anota AI")
+    def _build_computer_frame(self) -> None:
+        _, body = self._build_screen_shell(self.computer_frame, "Computador — Anota AI")
         definitions = [
             ("Limpeza de Cache", self._clean_cache),
             ("Sincronização de Hora", self._sync_time),
             ("Compatibilidade", self._check_compatibility),
             ("Teste de Velocidade", self._speed_test),
             ("Monitor de CPU", self._monitor_cpu),
-            ("Executar Tudo", self._run_all),
+            ("Verificar Antivírus", self._check_antivirus),
+            ("Verificar Inicialização", self._check_startup),
+            ("Informações do Sistema", self._show_system_info),
         ]
-        self._build_action_screen(body, "tools", definitions, with_progress=True)
+        results_frame = self._build_action_screen(
+            body, "computer", definitions, with_progress=True
+        )
+        self._build_run_all_card(results_frame)
+
+    def _build_program_frame(self) -> None:
+        _, body = self._build_screen_shell(self.program_frame, "Programa — Anota AI")
+        definitions = [
+            ("Verificar Processos Ativos", self._check_anota_processes),
+            ("Reiniciar Anota AI", self._restart_anota),
+            ("Ler Logs do Anota AI", self._read_anota_logs),
+            ("Reparar Atalhos", self._repair_shortcuts),
+            ("Desinstalar Anota AI", self._uninstall_anota),
+            ("Baixar Anota AI Desktop", self._download_desktop),
+        ]
+        results_frame = self._build_action_screen(body, "program", definitions)
+        self._build_scan_card(results_frame)
+
+    def _build_run_all_card(self, body: tk.Frame) -> None:
+        """Cria o cartão destacado para executar o diagnóstico completo."""
+        card = tk.Frame(
+            body,
+            bg=BG_CARD,
+            highlightbackground=BORDER_COLOR,
+            highlightthickness=1,
+        )
+        children = body.winfo_children()
+        card.pack(fill="x", pady=(0, 8), before=children[0])
+        content = tk.Frame(card, bg=BG_CARD, padx=12, pady=10)
+        content.pack(fill="x")
+        title_row = tk.Frame(content, bg=BG_CARD)
+        title_row.pack(fill="x")
+        tk.Label(
+            title_row,
+            text="Executar diagnóstico completo",
+            bg=BG_CARD,
+            fg=TEXT_DARK,
+            font=FONT_CARD,
+            anchor="w",
+        ).pack(side="left", fill="x", expand=True)
+        run_all_button = self._make_button(
+            title_row, "▶", self._run_all
+        )
+        run_all_button.pack(side="right")
+        self._run_all_status = tk.Label(
+            content,
+            text="Aguardando execução",
+            bg=BG_CARD,
+            fg=TEXT_DARK,
+            font=FONT_STATUS,
+            anchor="w",
+            justify="left",
+            wraplength=900,
+        )
+        self._run_all_status.pack(fill="x", pady=(8, 0))
+
+    def _build_scan_card(self, body: tk.Frame) -> None:
+        """Cria o cartão destacado que apresenta o scanner do Anota AI."""
+        card = tk.Frame(body, bg=BG_CARD, highlightbackground=BORDER_COLOR, highlightthickness=1)
+        pack_options = {"fill": "x", "pady": (0, 8)}
+        # O conteúdo dos resultados já foi criado. Insere o scanner antes dele
+        # para que o cartão fique no topo sem misturar pack e grid no mesmo
+        # container (o conteúdo usa grid internamente).
+        children = body.winfo_children()
+        if children:
+            pack_options["before"] = children[0]
+        card.pack(**pack_options)
+        content = tk.Frame(card, bg=BG_CARD, padx=12, pady=10)
+        content.pack(fill="x")
+        title_row = tk.Frame(content, bg=BG_CARD)
+        title_row.pack(fill="x")
+        tk.Label(
+            title_row,
+            text="Scanner de instalação do Anota AI",
+            bg=BG_CARD,
+            fg=TEXT_DARK,
+            font=FONT_CARD,
+            anchor="w",
+        ).pack(side="left", fill="x", expand=True)
+        self._scan_button = self._make_button(
+            title_row, "⌕ Scanear", self._scan_anota_installation
+        )
+        self._scan_button.pack(side="right")
+        self._scan_status = tk.Label(
+            content,
+            text="Ainda não escaneado",
+            bg=BG_CARD,
+            fg=TEXT_DARK,
+            font=FONT_STATUS,
+            anchor="w",
+            justify="left",
+            wraplength=900,
+        )
+        self._scan_status.pack(fill="x", pady=(8, 0))
 
     def _build_printer_frame(self) -> None:
         _, body = self._build_screen_shell(self.printer_frame, "Impressora — Anota AI")
@@ -305,26 +422,22 @@ class SystemDiagnosticsApp:
             ("Abrir Impressoras", self._open_printers),
             ("Limpar Fila de Impressão", self._clear_printer_queue),
             ("Verificar PID na Porta 5000", self._check_port_5000),
+            ("Baixar Instalador de Drivers", self._download_driver),
+            ("Baixar NetStatGUI", self._download_netstatgui),
         ]
         self._build_action_screen(body, "printer", definitions)
 
-    def _build_files_frame(self) -> None:
-        _, body = self._build_screen_shell(self.files_frame, "Arquivos Úteis — Anota AI")
+    def _build_network_frame(self) -> None:
+        _, body = self._build_screen_shell(self.network_frame, "Rede — Anota AI")
         definitions = [
-            ("Baixar Instalador de Drivers", self._download_driver),
-            ("Baixar Anota AI Desktop", self._download_desktop),
-            ("Baixar NetStatGUI", self._download_netstatgui),
-        ]
-        self._build_action_screen(body, "files", definitions)
-
-    def _build_commands_frame(self) -> None:
-        _, body = self._build_screen_shell(self.commands_frame, "Outros Comandos — Anota AI")
-        definitions = [
+            ("Flush DNS", self._flush_dns),
+            ("Verificar Firewall", self._check_firewall),
+            ("Testar Conexão Anota AI", self._test_anota_connection),
             ("Ipconfig", self._ipconfig),
             ("ARP -a", self._arp),
             ("MSCONFIG", self._open_msconfig),
         ]
-        self._build_action_screen(body, "commands", definitions)
+        self._build_action_screen(body, "network", definitions)
 
     def _build_action_screen(
         self,
@@ -332,27 +445,86 @@ class SystemDiagnosticsApp:
         screen: str,
         definitions: list[tuple[str, Action]],
         with_progress: bool = False,
-    ) -> None:
+    ) -> tk.Frame:
         """Cria a composição horizontal: botões à esquerda e terminal à direita."""
         sidebar = tk.Frame(body, bg=BG_LIGHT, width=SIDEBAR_WIDTH)
         sidebar.pack(side="left", fill="y")
         sidebar.pack_propagate(False)
+        # O menu lateral pode conter mais ações do que a altura disponível.
+        # O canvas mantém os botões acessíveis sem aumentar a janela inteira.
+        actions_view = tk.Frame(sidebar, bg=BG_LIGHT)
+        actions_view.pack(fill="both", expand=True)
+        actions_canvas = tk.Canvas(
+            actions_view,
+            bg=BG_LIGHT,
+            highlightthickness=0,
+            borderwidth=0,
+        )
+        actions_scrollbar = tk.Scrollbar(
+            actions_view,
+            orient="vertical",
+            command=actions_canvas.yview,
+            troughcolor=BG_LIGHT,
+            activebackground=PRIMARY_COLOR,
+            relief="flat",
+            borderwidth=0,
+        )
+        actions_canvas.configure(yscrollcommand=actions_scrollbar.set)
+        actions_canvas.pack(side="left", fill="both", expand=True)
+        actions_scrollbar.pack(side="right", fill="y")
         actions = tk.Frame(
-            sidebar,
+            actions_canvas,
             bg=BG_LIGHT,
             padx=PADX_SIDEBAR,
             pady=PADY_SIDEBAR,
         )
-        actions.pack(fill="both", expand=True)
+        actions_window = actions_canvas.create_window(
+            (0, 0), window=actions, anchor="nw"
+        )
+
+        def _on_canvas_configure(event: tk.Event) -> None:
+            """Mantém o frame interno com a largura visível do canvas."""
+            actions_canvas.itemconfigure(actions_window, width=event.width)
+            actions_canvas.configure(scrollregion=actions_canvas.bbox("all"))
+
+        def _on_frame_configure(_event: tk.Event) -> None:
+            """Recalcula a área rolável sempre que um botão é adicionado."""
+            actions_canvas.configure(scrollregion=actions_canvas.bbox("all"))
+
+        def _on_mousewheel(event: tk.Event) -> None:
+            """Rola o sidebar enquanto o cursor estiver sobre a área de ações."""
+            delta = getattr(event, "delta", 0)
+            if delta:
+                actions_canvas.yview_scroll(int(-1 * (delta / 120)), "units")
+
+        def _enable_mousewheel(_event: tk.Event) -> None:
+            actions_canvas.bind_all("<MouseWheel>", _on_mousewheel)
+
+        def _disable_mousewheel(_event: tk.Event) -> None:
+            actions_canvas.unbind_all("<MouseWheel>")
+
+        # A largura do frame acompanha o canvas e sua altura alimenta o
+        # scrollregion. Isso também cobre mudanças de tamanho da janela.
+        actions_canvas.bind("<Configure>", _on_canvas_configure)
+        actions.bind("<Configure>", _on_frame_configure)
+        # O canvas recebe os eventos quando o cursor está sobre a área rolável;
+        # os binds no sidebar cobrem também suas áreas auxiliares.
+        actions_canvas.bind("<Enter>", _enable_mousewheel)
+        actions_canvas.bind("<Leave>", _disable_mousewheel)
+        sidebar.bind("<Enter>", _enable_mousewheel)
+        sidebar.bind("<Leave>", _disable_mousewheel)
         buttons: list[ttk.Button] = []
         for label, action in definitions:
             button = self._make_button(actions, label, action)
             button.pack(fill="x", pady=3)
             buttons.append(button)
             self._button_labels[button] = label
+        # Garante a região inicial mesmo antes do primeiro <Configure> do
+        # frame interno (importante quando a tela é construída já visível).
+        actions_canvas.configure(scrollregion=actions_canvas.bbox("all"))
         self._buttons[screen] = buttons
 
-        self._build_results(body, screen, with_progress)
+        results_frame = self._build_results(body, screen, with_progress)
         footer = tk.Frame(sidebar, bg=BG_LIGHT, padx=12, pady=10)
         footer.pack(side="bottom", fill="x")
         status = tk.Label(
@@ -378,6 +550,7 @@ class SystemDiagnosticsApp:
         )
         self._buttons[screen].append(back_button)
         self._button_labels[back_button] = "Voltar"
+        return results_frame
 
     @staticmethod
     def _make_button(
@@ -404,7 +577,7 @@ class SystemDiagnosticsApp:
             cursor="hand2",
         )
 
-    def _build_results(self, body: tk.Frame, screen: str, with_progress: bool) -> None:
+    def _build_results(self, body: tk.Frame, screen: str, with_progress: bool) -> tk.Frame:
         results_frame = tk.Frame(
             body,
             bg=BG_WHITE,
@@ -412,12 +585,17 @@ class SystemDiagnosticsApp:
             pady=PADDING_BODY[1],
         )
         results_frame.pack(side="left", fill="both", expand=True)
+        # Mantém o scanner (que usa pack) separado dos widgets de resultados,
+        # que usam grid. Assim o card pode ser inserido no topo depois que a
+        # tela for montada sem conflito entre gerenciadores de geometria.
+        results_content = tk.Frame(results_frame, bg=BG_WHITE)
+        results_content.pack(fill="both", expand=True)
         row = 0
         progress_frame = None
         progress_label = None
         progress_bar = None
         if with_progress:
-            progress_frame = tk.Frame(results_frame, bg=BG_WHITE)
+            progress_frame = tk.Frame(results_content, bg=BG_WHITE)
             progress_frame.grid(row=0, column=0, sticky="ew", pady=(0, 8))
             progress_frame.grid_columnconfigure(0, weight=1)
             progress_label = tk.Label(
@@ -438,9 +616,9 @@ class SystemDiagnosticsApp:
             progress_bar.grid(row=1, column=0, sticky="ew")
             progress_frame.grid_remove()
             row = 1
-        results_frame.grid_rowconfigure(row, weight=1)
-        results_frame.grid_columnconfigure(0, weight=1)
-        output_frame = ttk.Frame(results_frame, style="Output.TFrame", padding=1)
+        results_content.grid_rowconfigure(row, weight=1)
+        results_content.grid_columnconfigure(0, weight=1)
+        output_frame = ttk.Frame(results_content, style="Output.TFrame", padding=1)
         output_frame.grid(row=row, column=0, sticky="nsew")
         output = tk.Text(
             output_frame,
@@ -460,7 +638,7 @@ class SystemDiagnosticsApp:
             selectforeground=TEXT_WHITE,
         )
         scrollbar = tk.Scrollbar(
-            results_frame,
+            results_content,
             orient="vertical",
             command=output.yview,
             troughcolor=BG_LIGHT,
@@ -479,6 +657,7 @@ class SystemDiagnosticsApp:
             self._progress_label = progress_label
             self._progress_bar = progress_bar
             self._output_scrollbar = scrollbar
+        return results_frame
 
     def _show_frame(self, frame: tk.Frame) -> None:
         if self._busy or self._command_busy:
@@ -523,7 +702,7 @@ class SystemDiagnosticsApp:
         output.configure(state="disabled")
 
     def _show_progress(self, label_text: str, total: int) -> None:
-        output = self._outputs["tools"]
+        output = self._outputs["computer"]
         output.configure(state="normal")
         output.delete("1.0", "end")
         output.configure(state="disabled")
@@ -553,31 +732,40 @@ class SystemDiagnosticsApp:
             "VERIFICAÇÃO DE COMPATIBILIDADE": "Verificando compatibilidade",
             "TESTE DE VELOCIDADE": "Testando velocidade",
             "MONITOR DE CPU": "Monitorando CPU",
+            "PROCESSOS ATIVOS DO ANOTA AI": "Verificando processos do Anota AI",
+            "VERSÃO INSTALADA DO ANOTA AI": "Verificando versão instalada",
+            "LOGS DO ANOTA AI": "Lendo logs do Anota AI",
+            "STATUS DO ANTIVÍRUS": "Verificando antivírus",
+            "PROGRAMAS NA INICIALIZAÇÃO": "Verificando inicialização",
         }
         return names.get(section_title, section_title)
 
-    def _set_tool_busy(self, label: str) -> None:
+    def _set_tool_busy(self, screen: str, label: str) -> None:
         self._busy = True
-        self._active_screen = "tools"
-        self._statuses["tools"].configure(text="Status: Executando...", fg=PRIMARY_COLOR)
-        for button in self._buttons["tools"]:
+        self._active_screen = screen
+        self._statuses[screen].configure(text="Status: Executando...", fg=PRIMARY_COLOR)
+        for button in self._buttons[screen]:
             button.configure(state="disabled")
             if self._button_labels[button] == label:
                 button.configure(text="Executando...")
 
     def _set_tool_ready(self) -> None:
+        screen = self._active_screen
         self._busy = False
-        self._statuses["tools"].configure(text="Status: Pronto", fg=ACCENT_GREEN)
-        for button in self._buttons["tools"]:
+        self._statuses[screen].configure(text="Status: Pronto", fg=ACCENT_GREEN)
+        for button in self._buttons[screen]:
             button.configure(state="normal", text=self._button_labels[button])
 
-    def _start_operation(self, label: str, sections: list[Section]) -> None:
-        if self._busy or self._command_busy:
+    def _start_operation(
+        self, label: str, sections: list[Section], screen: str = "computer"
+    ) -> None:
+        if self._busy or self._command_busy or self._scan_busy:
             return
-        self._set_tool_busy(label)
+        self._set_tool_busy(screen, label)
         self._pending_tool_output = ""
-        progress_name = label if len(sections) > 1 else self._progress_name(sections[0][0])
-        self._show_progress(progress_name, len(sections))
+        if screen == "computer":
+            progress_name = label if len(sections) > 1 else self._progress_name(sections[0][0])
+            self._show_progress(progress_name, len(sections))
         worker = threading.Thread(
             target=self._run_sections,
             args=(sections,),
@@ -611,26 +799,29 @@ class SystemDiagnosticsApp:
         except queue.Empty:
             message_type, payload = None, None
         if message_type == "progress" and payload:
-            progress_name = self._progress_name(payload)
-            next_step = min(self._progress_current + 1, self._progress_total)
-            self._progress_label.configure(
-                text=f"Executando: {progress_name}... ({next_step}/{self._progress_total})"
-            )
+            if self._active_screen == "computer":
+                progress_name = self._progress_name(payload)
+                next_step = min(self._progress_current + 1, self._progress_total)
+                self._progress_label.configure(
+                    text=f"Executando: {progress_name}... ({next_step}/{self._progress_total})"
+                )
         elif message_type == "output" and payload:
             self._pending_tool_output += payload
-            self._progress_current = min(self._progress_current + 1, self._progress_total)
-            self._progress_bar.configure(
-                mode="determinate", maximum=self._progress_total, value=self._progress_current
-            )
+            if self._active_screen == "computer":
+                self._progress_current = min(self._progress_current + 1, self._progress_total)
+                self._progress_bar.configure(
+                    mode="determinate", maximum=self._progress_total, value=self._progress_current
+                )
         elif message_type == "done":
-            self._append_output("tools", self._pending_tool_output)
-            self._hide_progress()
+            self._append_output(self._active_screen, self._pending_tool_output)
+            if self._active_screen == "computer":
+                self._hide_progress()
             self._set_tool_ready()
             return
         if self._busy:
             self.root.after(50, self._process_queue)
 
-    # ---- Aba Ferramentas -------------------------------------------------
+    # ---- Aba Computador --------------------------------------------------
 
     def _clean_cache(self) -> None:
         self._start_operation("Limpeza de Cache", [("LIMPEZA DE CACHE", display_temp_cleaner)])
@@ -657,6 +848,40 @@ class SystemDiagnosticsApp:
             [("MONITOR DE CPU", lambda: monitor_cpu(duration=10, interval=1.0))],
         )
 
+    def _show_system_info(self) -> None:
+        self._start_operation(
+            "Informações do Sistema", [("INFORMAÇÕES DO SISTEMA", display_system_info)]
+        )
+
+    def _check_anota_processes(self) -> None:
+        self._start_operation(
+            "Verificar Processos Ativos", [("PROCESSOS ATIVOS DO ANOTA AI", display_anota_processes)], "program"
+        )
+
+    def _restart_anota(self) -> None:
+        self._start_operation("Reiniciar Anota AI", [("REINICIAR ANOTA AI", display_restart_anota)], "program")
+
+    def _read_anota_logs(self) -> None:
+        self._start_operation("Ler Logs do Anota AI", [("LOGS DO ANOTA AI", display_anota_logs)], "program")
+
+    def _check_antivirus(self) -> None:
+        self._start_operation("Verificar Antivírus", [("STATUS DO ANTIVÍRUS", display_antivirus_status)])
+
+    def _repair_shortcuts(self) -> None:
+        self._start_operation("Reparar Atalhos", [("REPARAR ATALHO", display_repair_shortcut)], "program")
+
+    def _uninstall_anota(self) -> None:
+        self._start_operation(
+            "Desinstalar Anota AI",
+            [("DESINSTALAÇÃO COMPLETA DO ANOTA AI", display_uninstall)],
+            "program",
+        )
+
+    def _check_startup(self) -> None:
+        self._start_operation(
+            "Verificar Inicialização", [("PROGRAMAS NA INICIALIZAÇÃO", display_startup_programs)]
+        )
+
     def _run_all(self) -> None:
         self._start_operation(
             "Executar Tudo",
@@ -666,10 +891,56 @@ class SystemDiagnosticsApp:
                 ("VERIFICAÇÃO DE COMPATIBILIDADE", display_compatibility_check),
                 ("TESTE DE VELOCIDADE", display_speed_test),
                 ("MONITOR DE CPU", lambda: monitor_cpu(duration=10, interval=1.0)),
+                ("STATUS DO ANTIVÍRUS", display_antivirus_status),
+                ("PROGRAMAS NA INICIALIZAÇÃO", display_startup_programs),
+                ("INFORMAÇÕES DO SISTEMA", display_system_info),
             ],
         )
 
-    # ---- Abas Impressora e Outros Comandos -------------------------------
+    def _scan_anota_installation(self) -> None:
+        """Executa o scanner em segundo plano e atualiza o cartão de status."""
+        if self._busy or self._command_busy or self._scan_busy or self._scan_button is None:
+            return
+        self._scan_busy = True
+        self._scan_button.configure(state="disabled", text="Scanear...")
+        if self._scan_status is not None:
+            self._scan_status.configure(text="Procurando a instalação do Anota AI...", fg=TEXT_DARK)
+        threading.Thread(
+            target=self._run_anota_scan,
+            daemon=True,
+            name="anota-installation-scan",
+        ).start()
+        self.root.after(50, self._process_scan_queue)
+
+    def _run_anota_scan(self) -> None:
+        try:
+            result = scan_anota_installation()
+        except Exception:  # pragma: no cover - proteção da thread
+            result = (False, "", "")
+        self._scan_result_queue.put(result)
+
+    def _process_scan_queue(self) -> None:
+        try:
+            found, path, version = self._scan_result_queue.get_nowait()
+        except queue.Empty:
+            self.root.after(50, self._process_scan_queue)
+            return
+        if self._scan_status is not None:
+            if found:
+                self._scan_status.configure(
+                    text=f"Anota AI instalado — versão {version}",
+                    fg=ACCENT_GREEN,
+                )
+            else:
+                self._scan_status.configure(
+                    text="Anota AI não encontrado",
+                    fg=PRIMARY_COLOR,
+                )
+        self._scan_busy = False
+        if self._scan_button is not None:
+            self._scan_button.configure(state="normal", text="⌕ Scanear")
+
+    # ---- Ações de Impressora ------------------------------------
 
     def _set_command_busy(self, screen: str, label: str) -> None:
         self._command_busy = True
@@ -689,7 +960,7 @@ class SystemDiagnosticsApp:
             button.configure(state="normal", text=self._button_labels[button])
 
     def _start_command_thread(self, screen: str, label: str, action: Action) -> None:
-        if self._busy or self._command_busy:
+        if self._busy or self._command_busy or self._scan_busy:
             return
         self._set_command_busy(screen, label)
         worker = threading.Thread(
@@ -754,16 +1025,16 @@ class SystemDiagnosticsApp:
 
     def _ipconfig(self) -> None:
         self._start_command_thread(
-            "commands", "Ipconfig", lambda: self._queue_command_output(_run_command_capture(["ipconfig", "/all"]))
+            "network", "Ipconfig", lambda: self._queue_command_output(_run_command_capture(["ipconfig", "/all"]))
         )
 
     def _arp(self) -> None:
         self._start_command_thread(
-            "commands", "ARP -a", lambda: self._queue_command_output(_run_command_capture(["arp", "-a"]))
+            "network", "ARP -a", lambda: self._queue_command_output(_run_command_capture(["arp", "-a"]))
         )
 
     def _open_msconfig(self) -> None:
-        self._start_command_thread("commands", "MSCONFIG", self._open_msconfig_worker)
+        self._start_command_thread("network", "MSCONFIG", self._open_msconfig_worker)
 
     def _open_msconfig_worker(self) -> None:
         if platform.system() != "Windows":
@@ -772,7 +1043,29 @@ class SystemDiagnosticsApp:
         subprocess.Popen(["msconfig"], creationflags=_creation_flags())
         self._queue_command_output("Abrindo MSCONFIG...")
 
-    # ---- Aba Arquivos Úteis ----------------------------------------------
+    def _flush_dns(self) -> None:
+        self._start_command_thread(
+            "network", "Flush DNS", lambda: self._queue_command_output_capture(display_flush_dns)
+        )
+
+    def _check_firewall(self) -> None:
+        self._start_command_thread(
+            "network", "Verificar Firewall", lambda: self._queue_command_output_capture(display_firewall_status)
+        )
+
+    def _test_anota_connection(self) -> None:
+        self._start_command_thread(
+            "network", "Testar Conexão Anota AI", lambda: self._queue_command_output_capture(display_anota_connection)
+        )
+
+    def _queue_command_output_capture(self, action: Action) -> None:
+        """Captura funções de diagnóstico que imprimem na saída padrão."""
+        captured = StringIO()
+        with redirect_stdout(captured):
+            action()
+        self._queue_command_output(captured.getvalue())
+
+    # ---- Downloads distribuídos entre Computador e Programa -------------
 
     @staticmethod
     def _downloads_path() -> str:
@@ -784,21 +1077,21 @@ class SystemDiagnosticsApp:
 
     def _download_driver(self) -> None:
         self._start_command_thread(
-            "files", "Baixar Instalador de Drivers", lambda: self._download_file(
+            "printer", "Baixar Instalador de Drivers", lambda: self._download_file(
                 self.DRIVER_URL, self.DRIVER_FILENAME, "Baixando Instalador de Drivers..."
             )
         )
 
     def _download_desktop(self) -> None:
         self._start_command_thread(
-            "files", "Baixar Anota AI Desktop", lambda: self._download_file(
+            "program", "Baixar Anota AI Desktop", lambda: self._download_file(
                 self.DESKTOP_URL, self.DESKTOP_FILENAME, "Baixando Anota AI Desktop..."
             )
         )
 
     def _download_netstatgui(self) -> None:
         self._start_command_thread(
-            "files", "Baixar NetStatGUI", lambda: self._download_file(
+            "printer", "Baixar NetStatGUI", lambda: self._download_file(
                 self.NETSTATGUI_URL, self.NETSTATGUI_FILENAME, "Baixando NetStatGUI..."
             )
         )
