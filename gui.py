@@ -113,19 +113,16 @@ def _clear_print_queue() -> str:
     ]
     output_lines: list[str] = []
     for command in commands:
-        # ``del`` é um comando interno do CMD; shell=True é usado somente
-        # nesta rotina, como exige o próprio Windows para esse comando.
-        command_text = " ".join(command)
         try:
             if command[0].casefold() == "del":
-                # ``del`` é interno ao CMD e exige shell=True.
+                # ``del`` é interno ao CMD; usa cmd /c para evitar shell=True.
+                cmd = ["cmd", "/c"] + command
                 result = subprocess.run(
-                    command_text,
+                    cmd,
                     capture_output=True,
                     text=True,
                     timeout=15,
                     check=False,
-                    shell=True,
                     creationflags=_creation_flags(),
                 )
             else:
