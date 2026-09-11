@@ -330,7 +330,6 @@ class SystemDiagnosticsApp:
             ("Reiniciar Anota AI", self._restart_anota),
             ("Ler Logs do Anota AI", self._read_anota_logs),
             ("Reparar Atalhos", self._repair_shortcuts),
-            ("Baixar Instalador de Drivers", self._download_driver),
             ("Baixar Anota AI Desktop", self._download_desktop),
         ]
         self._build_action_screen(body, "program", definitions)
@@ -373,6 +372,7 @@ class SystemDiagnosticsApp:
             ("Abrir Impressoras", self._open_printers),
             ("Limpar Fila de Impressão", self._clear_printer_queue),
             ("Verificar PID na Porta 5000", self._check_port_5000),
+            ("Baixar Instalador de Drivers", self._download_driver),
             ("Baixar NetStatGUI", self._download_netstatgui),
         ]
         self._build_action_screen(body, "printer", definitions)
@@ -431,24 +431,47 @@ class SystemDiagnosticsApp:
         actions_window = actions_canvas.create_window(
             (0, 0), window=actions, anchor="nw"
         )
-        actions.bind(
-            "<Configure>",
-            lambda _event: actions_canvas.configure(
-                scrollregion=actions_canvas.bbox("all")
-            ),
-        )
-        actions_canvas.bind(
-            "<Configure>",
-            lambda event: actions_canvas.itemconfigure(
-                actions_window, width=event.width
-            ),
-        )
+
+        def _on_canvas_configure(event: tk.Event) -> None:
+            """Mantém o frame interno com a largura visível do canvas."""
+            actions_canvas.itemconfigure(actions_window, width=event.width)
+            actions_canvas.configure(scrollregion=actions_canvas.bbox("all"))
+
+        def _on_frame_configure(_event: tk.Event) -> None:
+            """Recalcula a área rolável sempre que um botão é adicionado."""
+            actions_canvas.configure(scrollregion=actions_canvas.bbox("all"))
+
+        def _on_mousewheel(event: tk.Event) -> None:
+            """Rola o sidebar enquanto o cursor estiver sobre a área de ações."""
+            delta = getattr(event, "delta", 0)
+            if delta:
+                actions_canvas.yview_scroll(int(-1 * (delta / 120)), "units")
+
+        def _enable_mousewheel(_event: tk.Event) -> None:
+            actions_canvas.bind_all("<MouseWheel>", _on_mousewheel)
+
+        def _disable_mousewheel(_event: tk.Event) -> None:
+            actions_canvas.unbind_all("<MouseWheel>")
+
+        # A largura do frame acompanha o canvas e sua altura alimenta o
+        # scrollregion. Isso também cobre mudanças de tamanho da janela.
+        actions_canvas.bind("<Configure>", _on_canvas_configure)
+        actions.bind("<Configure>", _on_frame_configure)
+        # O canvas recebe os eventos quando o cursor está sobre a área rolável;
+        # os binds no sidebar cobrem também suas áreas auxiliares.
+        actions_canvas.bind("<Enter>", _enable_mousewheel)
+        actions_canvas.bind("<Leave>", _disable_mousewheel)
+        sidebar.bind("<Enter>", _enable_mousewheel)
+        sidebar.bind("<Leave>", _disable_mousewheel)
         buttons: list[ttk.Button] = []
         for label, action in definitions:
             button = self._make_button(actions, label, action)
             button.pack(fill="x", pady=3)
             buttons.append(button)
             self._button_labels[button] = label
+        # Garante a região inicial mesmo antes do primeiro <Configure> do
+        # frame interno (importante quando a tela é construída já visível).
+        actions_canvas.configure(scrollregion=actions_canvas.bbox("all"))
         self._buttons[screen] = buttons
 
         self._build_results(body, screen, with_progress)
@@ -990,7 +1013,7 @@ class SystemDiagnosticsApp:
 
     def _download_driver(self) -> None:
         self._start_command_thread(
-            "program", "Baixar Instalador de Drivers", lambda: self._download_file(
+            "printer", "Baixar Instalador de Drivers", lambda: self._download_file(
                 self.DRIVER_URL, self.DRIVER_FILENAME, "Baixando Instalador de Drivers..."
             )
         )
