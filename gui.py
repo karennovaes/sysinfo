@@ -40,6 +40,23 @@ from modules.speedtest import display_speed_test
 from modules.temp_cleaner import display_temp_cleaner
 from modules.system_info import collect_system_info, display_system_info
 from modules.security import calculate_sha256, log_audit, validate_url
+from modules.anota_logs import display_anota_logs
+from modules.anota_process import (
+    display_anota_processes,
+    display_installed_version,
+    display_restart_anota,
+)
+from modules.maintenance import (
+    display_antivirus_status,
+    display_repair_shortcut,
+    display_startup_programs,
+)
+from modules.network_tools import (
+    display_anota_connection,
+    display_firewall_status,
+    display_flush_dns,
+)
+from modules.report import copy_report_to_clipboard, export_report
 from modules.theme import *
 
 Action = Callable[[], None]
@@ -160,12 +177,14 @@ class SystemDiagnosticsApp:
         self.printer_frame = tk.Frame(self.container, bg=BG_WHITE)
         self.files_frame = tk.Frame(self.container, bg=BG_WHITE)
         self.commands_frame = tk.Frame(self.container, bg=BG_WHITE)
+        self.network_frame = tk.Frame(self.container, bg=BG_WHITE)
         self._frames = (
             self.initial_frame,
             self.tools_frame,
             self.printer_frame,
             self.files_frame,
             self.commands_frame,
+            self.network_frame,
         )
 
         self._buttons: dict[str, list[ttk.Button]] = {}
@@ -186,6 +205,7 @@ class SystemDiagnosticsApp:
         self._build_printer_frame()
         self._build_files_frame()
         self._build_commands_frame()
+        self._build_network_frame()
         self.initial_frame.pack(fill="both", expand=True)
 
     def _configure_styles(self) -> None:
@@ -280,6 +300,7 @@ class SystemDiagnosticsApp:
             ("🖨️  Impressora", lambda: self._show_frame(self.printer_frame)),
             ("📁  Arquivos Úteis", lambda: self._show_frame(self.files_frame)),
             ("⚡  Outros Comandos", lambda: self._show_frame(self.commands_frame)),
+            ("🌐  Rede", lambda: self._show_frame(self.network_frame)),
         ]
         for label, action in definitions:
             shadow = tk.Frame(content, bg=SHADOW_COLOR)
@@ -295,6 +316,15 @@ class SystemDiagnosticsApp:
             ("Compatibilidade", self._check_compatibility),
             ("Teste de Velocidade", self._speed_test),
             ("Monitor de CPU", self._monitor_cpu),
+            ("Verificar Processos Ativos", self._check_anota_processes),
+            ("Reiniciar Anota AI", self._restart_anota),
+            ("Verificar Versão Instalada", self._check_anota_version),
+            ("Ler Logs do Anota AI", self._read_anota_logs),
+            ("Verificar Antivírus", self._check_antivirus),
+            ("Reparar Atalhos", self._repair_shortcuts),
+            ("Verificar Inicialização", self._check_startup),
+            ("Exportar Relatório", self._export_report),
+            ("Copiar Relatório", self._copy_report),
             ("Executar Tudo", self._run_all),
         ]
         self._build_action_screen(body, "tools", definitions, with_progress=True)
@@ -325,6 +355,15 @@ class SystemDiagnosticsApp:
             ("MSCONFIG", self._open_msconfig),
         ]
         self._build_action_screen(body, "commands", definitions)
+
+    def _build_network_frame(self) -> None:
+        _, body = self._build_screen_shell(self.network_frame, "Rede — Anota AI")
+        definitions = [
+            ("Flush DNS", self._flush_dns),
+            ("Verificar Firewall", self._check_firewall),
+            ("Testar Conexão Anota AI", self._test_anota_connection),
+        ]
+        self._build_action_screen(body, "network", definitions)
 
     def _build_action_screen(
         self,
@@ -553,6 +592,11 @@ class SystemDiagnosticsApp:
             "VERIFICAÇÃO DE COMPATIBILIDADE": "Verificando compatibilidade",
             "TESTE DE VELOCIDADE": "Testando velocidade",
             "MONITOR DE CPU": "Monitorando CPU",
+            "PROCESSOS ATIVOS DO ANOTA AI": "Verificando processos do Anota AI",
+            "VERSÃO INSTALADA DO ANOTA AI": "Verificando versão instalada",
+            "LOGS DO ANOTA AI": "Lendo logs do Anota AI",
+            "STATUS DO ANTIVÍRUS": "Verificando antivírus",
+            "PROGRAMAS NA INICIALIZAÇÃO": "Verificando inicialização",
         }
         return names.get(section_title, section_title)
 
@@ -657,6 +701,53 @@ class SystemDiagnosticsApp:
             [("MONITOR DE CPU", lambda: monitor_cpu(duration=10, interval=1.0))],
         )
 
+    def _check_anota_processes(self) -> None:
+        self._start_operation(
+            "Verificar Processos Ativos", [("PROCESSOS ATIVOS DO ANOTA AI", display_anota_processes)]
+        )
+
+    def _restart_anota(self) -> None:
+        self._start_operation("Reiniciar Anota AI", [("REINICIAR ANOTA AI", display_restart_anota)])
+
+    def _check_anota_version(self) -> None:
+        self._start_operation(
+            "Verificar Versão Instalada", [("VERSÃO INSTALADA DO ANOTA AI", display_installed_version)]
+        )
+
+    def _read_anota_logs(self) -> None:
+        self._start_operation("Ler Logs do Anota AI", [("LOGS DO ANOTA AI", display_anota_logs)])
+
+    def _check_antivirus(self) -> None:
+        self._start_operation("Verificar Antivírus", [("STATUS DO ANTIVÍRUS", display_antivirus_status)])
+
+    def _repair_shortcuts(self) -> None:
+        self._start_operation("Reparar Atalhos", [("REPARAR ATALHO", display_repair_shortcut)])
+
+    def _check_startup(self) -> None:
+        self._start_operation(
+            "Verificar Inicialização", [("PROGRAMAS NA INICIALIZAÇÃO", display_startup_programs)]
+        )
+
+    def _output_text(self, screen: str) -> str:
+        """Lê todo o texto visível do terminal, inclusive enquanto desabilitado."""
+        return self._outputs[screen].get("1.0", "end-1c")
+
+    def _export_report(self) -> None:
+        if self._busy or self._command_busy:
+            return
+        content = self._output_text("tools")
+        self._start_command_thread(
+            "tools",
+            "Exportar Relatório",
+            lambda: self._queue_command_output(export_report(content)),
+        )
+
+    def _copy_report(self) -> None:
+        if self._busy or self._command_busy:
+            return
+        message = copy_report_to_clipboard(self._output_text("tools"), self.root)
+        self._append_output("tools", f"{message}\n")
+
     def _run_all(self) -> None:
         self._start_operation(
             "Executar Tudo",
@@ -666,6 +757,11 @@ class SystemDiagnosticsApp:
                 ("VERIFICAÇÃO DE COMPATIBILIDADE", display_compatibility_check),
                 ("TESTE DE VELOCIDADE", display_speed_test),
                 ("MONITOR DE CPU", lambda: monitor_cpu(duration=10, interval=1.0)),
+                ("PROCESSOS ATIVOS DO ANOTA AI", display_anota_processes),
+                ("VERSÃO INSTALADA DO ANOTA AI", display_installed_version),
+                ("LOGS DO ANOTA AI", display_anota_logs),
+                ("STATUS DO ANTIVÍRUS", display_antivirus_status),
+                ("PROGRAMAS NA INICIALIZAÇÃO", display_startup_programs),
             ],
         )
 
@@ -771,6 +867,28 @@ class SystemDiagnosticsApp:
             return
         subprocess.Popen(["msconfig"], creationflags=_creation_flags())
         self._queue_command_output("Abrindo MSCONFIG...")
+
+    def _flush_dns(self) -> None:
+        self._start_command_thread(
+            "network", "Flush DNS", lambda: self._queue_command_output_capture(display_flush_dns)
+        )
+
+    def _check_firewall(self) -> None:
+        self._start_command_thread(
+            "network", "Verificar Firewall", lambda: self._queue_command_output_capture(display_firewall_status)
+        )
+
+    def _test_anota_connection(self) -> None:
+        self._start_command_thread(
+            "network", "Testar Conexão Anota AI", lambda: self._queue_command_output_capture(display_anota_connection)
+        )
+
+    def _queue_command_output_capture(self, action: Action) -> None:
+        """Captura funções de diagnóstico que imprimem na saída padrão."""
+        captured = StringIO()
+        with redirect_stdout(captured):
+            action()
+        self._queue_command_output(captured.getvalue())
 
     # ---- Aba Arquivos Úteis ----------------------------------------------
 
