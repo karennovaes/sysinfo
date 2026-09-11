@@ -63,23 +63,45 @@ def _scan_roots() -> list[Path]:
     return roots
 
 
-def _read_wmic_version(executable: Path) -> str:
-    """Obtém a versão do executável com WMIC, sem abrir uma janela de console."""
+def _read_version(executable: Path) -> str:
+    """Obtém a versão do executável usando PowerShell, com fallback para WMIC."""
     if platform.system() != "Windows":
         return "Não disponível neste sistema"
-    escaped_path = str(executable).replace("\\", "\\\\")
-    command = [
-        "wmic",
-        "datafile",
-        "where",
-        f"name='{escaped_path}'",
-        "get",
-        "Version",
-        "/value",
-    ]
+
+    # O WMIC foi removido de versões recentes do Windows 11. PowerShell usa
+    # diretamente os metadados do arquivo e lida melhor com caminhos longos.
+    escaped_powershell_path = str(executable).replace("'", "''")
     try:
         result = subprocess.run(
-            command,
+            [
+                "powershell",
+                "-Command",
+                f"(Get-Item '{escaped_powershell_path}').VersionInfo.ProductVersion",
+            ],
+            capture_output=True,
+            text=True,
+            timeout=15,
+            check=False,
+            creationflags=_creation_flags(),
+        )
+        if result.returncode == 0 and result.stdout.strip():
+            return result.stdout.strip()
+    except (OSError, subprocess.SubprocessError):
+        pass
+
+    # Fallback para instalações mais antigas do Windows que ainda possuem WMIC.
+    escaped_path = str(executable).replace("\\", "\\\\")
+    try:
+        result = subprocess.run(
+            [
+                "wmic",
+                "datafile",
+                "where",
+                f"name='{escaped_path}'",
+                "get",
+                "Version",
+                "/value",
+            ],
             capture_output=True,
             text=True,
             timeout=15,
@@ -87,18 +109,20 @@ def _read_wmic_version(executable: Path) -> str:
             creationflags=_creation_flags(),
         )
     except (OSError, subprocess.SubprocessError):
-        return "Não informado"
-    output = (result.stdout or "") + "\n" + (result.stderr or "")
-    match = re.search(r"(?im)^\s*Version\s*=\s*([^\r\n]+)", output)
-    if match:
-        return match.group(1).strip()
-    # Algumas versões do WMIC imprimem o cabeçalho e o valor em linhas
-    # separadas, então preservamos esse formato como fallback.
-    lines = [line.strip() for line in output.splitlines() if line.strip()]
-    for index, line in enumerate(lines[:-1]):
-        if line.casefold() == "version" and lines[index + 1]:
-            return lines[index + 1]
-    return "Não informado"
+        pass
+    else:
+        if result.returncode == 0:
+            output = (result.stdout or "") + "\n" + (result.stderr or "")
+            match = re.search(r"(?im)^\s*Version\s*=\s*([^\r\n]+)", output)
+            if match:
+                return match.group(1).strip()
+            # Algumas versões do WMIC imprimem cabeçalho e valor em linhas
+            # separadas.
+            lines = [line.strip() for line in output.splitlines() if line.strip()]
+            for index, line in enumerate(lines[:-1]):
+                if line.casefold() == "version" and lines[index + 1]:
+                    return lines[index + 1]
+    return "Versão não encontrada"
 
 
 def _find_anota_executable(folder: Path) -> Path | None:
@@ -116,7 +140,7 @@ def scan_anota_installation() -> tuple[bool, str, str]:
     O retorno é ``(encontrado, caminho, versão)``. Pastas com nome relacionado
     ao Anota AI também são consideradas instalações; quando há um executável
     dentro delas, o caminho retornado é o executável e sua versão é consultada
-    com WMIC.
+    com PowerShell.
     """
     matching_folder: Path | None = None
     for root in _scan_roots():
@@ -128,7 +152,7 @@ def scan_anota_installation() -> tuple[bool, str, str]:
             if _contains_anota_name(root.name):
                 executable = _find_anota_executable(root)
                 if executable is not None:
-                    return True, str(executable), _read_wmic_version(executable)
+                    return True, str(executable), _read_version(executable)
                 matching_folder = root
             for current, directories, files in os.walk(root, topdown=True, followlinks=False):
                 current_path = Path(current)
@@ -137,13 +161,13 @@ def scan_anota_installation() -> tuple[bool, str, str]:
                 for filename in files:
                     candidate = current_path / filename
                     if candidate.suffix.casefold() == ".exe" and _contains_anota_name(filename):
-                        return True, str(candidate), _read_wmic_version(candidate)
+                        return True, str(candidate), _read_version(candidate)
                 for directory in directories:
                     if _contains_anota_name(directory) and matching_folder is None:
                         folder = current_path / directory
                         executable = _find_anota_executable(folder)
                         if executable is not None:
-                            return True, str(executable), _read_wmic_version(executable)
+                            return True, str(executable), _read_version(executable)
                         matching_folder = folder
         except (OSError, PermissionError):
             continue

@@ -16,18 +16,9 @@ import time
 from pathlib import Path
 from typing import Iterable
 
-try:
-    from tkinter import messagebox
-except ImportError:  # pragma: no cover - Tk pode não existir em ambientes de CI
-    messagebox = None  # type: ignore[assignment]
-
 from .anota_process import kill_anota_processes, scan_anota_installation
 from .temp_cleaner import clean_temp
 
-_CONFIRMATION = (
-    "Tem certeza que deseja desinstalar completamente o Anota AI? "
-    "Esta ação não pode ser desfeita."
-)
 _UNINSTALLER_NAMES = ("uninstall.exe", "unins000.exe")
 _GREEN = "\033[92m"
 _RESET = "\033[0m"
@@ -253,14 +244,11 @@ def _print_report(
 
 
 def display_uninstall() -> None:
-    """Confirma e executa a desinstalação completa do Anota AI."""
-    if messagebox is None:
-        print("Desinstalação cancelada: tkinter não está disponível.")
-        return
-    if not messagebox.askyesno("Desinstalar Anota AI", _CONFIRMATION):
-        print("Desinstalação cancelada pelo usuário.")
-        return
+    """Executa a desinstalação completa do Anota AI.
 
+    A confirmação é responsabilidade da interface gráfica e deve ocorrer na
+    thread principal, antes de esta função ser executada pelo worker.
+    """
     print("DESINSTALAÇÃO COMPLETA DO ANOTA AI")
     print("[1/8] Finalizando processos do Anota AI...")
     if platform.system() != "Windows":

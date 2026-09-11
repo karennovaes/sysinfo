@@ -868,6 +868,15 @@ class SystemDiagnosticsApp:
         self._start_operation("Reparar Atalhos", [("REPARAR ATALHO", display_repair_shortcut)], "program")
 
     def _uninstall_anota(self) -> None:
+        """Confirma a desinstalação na thread principal antes do trabalho pesado."""
+        from tkinter import messagebox
+
+        if not messagebox.askyesno(
+            "Desinstalar Anota AI",
+            "Tem certeza que deseja desinstalar completamente o Anota AI? "
+            "Esta ação não pode ser desfeita.",
+        ):
+            return
         self._start_operation(
             "Desinstalar Anota AI",
             [("DESINSTALAÇÃO COMPLETA DO ANOTA AI", display_uninstall)],
