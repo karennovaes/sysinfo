@@ -173,6 +173,49 @@ def list_anota_processes() -> list[dict[str, str | int]]:
     return processes
 
 
+def kill_anota_processes() -> int:
+    """Finaliza processos do Anota AI usando ``taskkill /F /IM``.
+
+    A enumeração continua sendo feita por :func:`list_anota_processes`,
+    evitando encerrar processos de outros programas. O comando ``/IM`` é
+    executado uma vez para cada nome distinto encontrado; o retorno é a
+    quantidade de processos encontrados que o Windows confirmou como
+    finalizados.
+    """
+    if platform.system() != "Windows":
+        return 0
+
+    processes = list_anota_processes()
+    names: list[str] = []
+    process_count_by_name: dict[str, int] = {}
+    for process in processes:
+        name = str(process.get("name") or "").strip()
+        if not name:
+            continue
+        key = name.casefold()
+        if key not in process_count_by_name:
+            names.append(name)
+            process_count_by_name[key] = 0
+        process_count_by_name[key] += 1
+
+    killed = 0
+    for name in names:
+        try:
+            result = subprocess.run(
+                ["taskkill", "/F", "/IM", name],
+                capture_output=True,
+                text=True,
+                timeout=15,
+                check=False,
+                creationflags=_creation_flags(),
+            )
+        except (OSError, subprocess.SubprocessError):
+            continue
+        if result.returncode == 0:
+            killed += process_count_by_name[name.casefold()]
+    return killed
+
+
 def display_anota_processes() -> None:
     """Imprime os processos do Anota AI em formato adequado ao terminal."""
     processes = list_anota_processes()

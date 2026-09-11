@@ -46,6 +46,7 @@ from modules.anota_process import (
     display_restart_anota,
     scan_anota_installation,
 )
+from modules.uninstaller import display_uninstall
 from modules.maintenance import (
     display_antivirus_status,
     display_repair_shortcut,
@@ -332,6 +333,7 @@ class SystemDiagnosticsApp:
             ("Reiniciar Anota AI", self._restart_anota),
             ("Ler Logs do Anota AI", self._read_anota_logs),
             ("Reparar Atalhos", self._repair_shortcuts),
+            ("Desinstalar Anota AI", self._uninstall_anota),
             ("Baixar Anota AI Desktop", self._download_desktop),
         ]
         results_frame = self._build_action_screen(body, "program", definitions)
@@ -867,6 +869,13 @@ class SystemDiagnosticsApp:
 
     def _repair_shortcuts(self) -> None:
         self._start_operation("Reparar Atalhos", [("REPARAR ATALHO", display_repair_shortcut)], "program")
+
+    def _uninstall_anota(self) -> None:
+        self._start_operation(
+            "Desinstalar Anota AI",
+            [("DESINSTALAÇÃO COMPLETA DO ANOTA AI", display_uninstall)],
+            "program",
+        )
 
     def _check_startup(self) -> None:
         self._start_operation(
