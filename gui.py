@@ -360,7 +360,7 @@ class SystemDiagnosticsApp:
             anchor="w",
         ).pack(side="left", fill="x", expand=True)
         run_all_button = self._make_button(
-            title_row, "▶ Executar Tudo", self._run_all
+            title_row, "▶", self._run_all
         )
         run_all_button.pack(side="right")
         self._run_all_status = tk.Label(
