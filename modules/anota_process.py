@@ -176,8 +176,18 @@ def scan_anota_installation() -> tuple[bool, str, str]:
     return False, "", ""
 
 
+_SELF_EXCLUDE_MARKERS = ("diagnostico", "sysinfo", "suporte tools")
+
+def _is_self_process(name: str, pid: int) -> bool:
+    """Identifica o próprio utilitário para nao matá-lo acidentalmente."""
+    normalised = name.casefold()
+    if pid == os.getpid():
+        return True
+    return any(marker in normalised for marker in _SELF_EXCLUDE_MARKERS)
+
+
 def list_anota_processes() -> list[dict[str, str | int]]:
-    """Retorna processos cujo nome contém ``anota``."""
+    """Retorna processos cujo nome contém ``anota`` (excluindo o próprio utilitário)."""
     processes: list[dict[str, str | int]] = []
     try:
         iterator = psutil.process_iter(["pid", "name", "status"])
@@ -187,9 +197,12 @@ def list_anota_processes() -> list[dict[str, str | int]]:
                 name = str(info.get("name") or "")
                 if "anota" not in name.casefold():
                     continue
+                pid = info.get("pid", process.pid)
+                if _is_self_process(name, pid):
+                    continue
                 status = str(info.get("status") or "unknown")
                 state = "running" if status == psutil.STATUS_RUNNING else "not responding"
-                processes.append({"pid": info.get("pid", process.pid), "name": name, "status": state})
+                processes.append({"pid": pid, "name": name, "status": state})
             except (psutil.NoSuchProcess, psutil.AccessDenied, psutil.ZombieProcess):
                 continue
     except (OSError, RuntimeError):
@@ -215,6 +228,8 @@ def kill_anota_processes() -> int:
     for process in processes:
         name = str(process.get("name") or "").strip()
         if not name:
+            continue
+        if _is_self_process(name, int(process.get("pid", 0))):
             continue
         key = name.casefold()
         if key not in process_count_by_name:
