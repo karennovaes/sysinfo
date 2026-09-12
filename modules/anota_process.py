@@ -6,6 +6,7 @@ import os
 import platform
 import re
 import subprocess
+import sys
 import time
 from pathlib import Path
 from typing import Iterable
@@ -149,9 +150,9 @@ def scan_anota_installation() -> tuple[bool, str, str]:
         try:
             # Aceita também uma raiz que já seja a pasta do aplicativo.
             # Os diretórios abaixo continuam sendo percorridos normalmente.
-            if _contains_anota_name(root.name):
+            if _contains_anota_name(root.name) and not _is_self_path(root):
                 executable = _find_anota_executable(root)
-                if executable is not None:
+                if executable is not None and not _is_self_path(executable):
                     return True, str(executable), _read_version(executable)
                 matching_folder = root
             for current, directories, files in os.walk(root, topdown=True, followlinks=False):
@@ -160,13 +161,13 @@ def scan_anota_installation() -> tuple[bool, str, str]:
                 # versão real instalada no cartão da interface.
                 for filename in files:
                     candidate = current_path / filename
-                    if candidate.suffix.casefold() == ".exe" and _contains_anota_name(filename):
+                    if candidate.suffix.casefold() == ".exe" and _contains_anota_name(filename) and not _is_self_path(candidate):
                         return True, str(candidate), _read_version(candidate)
                 for directory in directories:
-                    if _contains_anota_name(directory) and matching_folder is None:
+                    if _contains_anota_name(directory) and matching_folder is None and not _is_self_path(current_path / directory):
                         folder = current_path / directory
                         executable = _find_anota_executable(folder)
-                        if executable is not None:
+                        if executable is not None and not _is_self_path(executable):
                             return True, str(executable), _read_version(executable)
                         matching_folder = folder
         except (OSError, PermissionError):
@@ -183,6 +184,18 @@ def _is_self_process(name: str, pid: int) -> bool:
     normalised = name.casefold()
     if pid == os.getpid():
         return True
+    return any(marker in normalised for marker in _SELF_EXCLUDE_MARKERS)
+
+
+def _is_self_path(path: Path | str) -> bool:
+    """Identifica arquivos/pastas do próprio utilitário para o scanner nao os confundir com o Anota AI."""
+    normalised = str(path).casefold()
+    # Compara tambem com o executável em execução.
+    try:
+        if os.path.samefile(path, sys.executable):
+            return True
+    except (OSError, ValueError):
+        pass
     return any(marker in normalised for marker in _SELF_EXCLUDE_MARKERS)
 
 
