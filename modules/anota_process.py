@@ -41,16 +41,13 @@ def _contains_anota_name(value: str) -> bool:
 
 
 def _scan_roots() -> list[Path]:
-    """Monta os diretórios de instalação sem depender de uma unidade fixa."""
+    """Retorna apenas os diretórios de instalação do Windows (Program Files)."""
     values = [
         os.environ.get("PROGRAMFILES(X86)"),
         os.environ.get("PROGRAMFILES"),
-        os.environ.get("LOCALAPPDATA"),
-        os.environ.get("APPDATA"),
+        r"C:\Program Files (x86)",
+        r"C:\Program Files",
     ]
-    # Em instalações Windows, estas pastas continuam sendo úteis mesmo quando
-    # o processo foi iniciado por um usuário com variáveis incompletas.
-    values.extend((r"C:\Program Files (x86)", r"C:\Program Files"))
     roots: list[Path] = []
     seen: set[str] = set()
     for value in values:
