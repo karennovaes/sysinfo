@@ -184,9 +184,14 @@ class SystemDiagnosticsApp:
         self._buttons: dict[str, list[ttk.Button]] = {}
         self._button_labels: dict[ttk.Button, str] = {}
         self._outputs: dict[str, tk.Text] = {}
+        self._output_frames: dict[str, ttk.Frame] = {}
+        self._output_scrollbars: dict[str, tk.Scrollbar] = {}
+        self._progress_bars: dict[str, ttk.Progressbar] = {}
+        self._progress_labels: dict[str, tk.Label] = {}
+        self._progress_frames: dict[str, tk.Frame] = {}
         self._statuses: dict[str, tk.Label] = {}
         self._result_queue: queue.Queue[tuple[str, str | None]] = queue.Queue()
-        self._command_result_queue: queue.Queue[tuple[str, str | None]] = queue.Queue()
+        self._command_result_queue: queue.Queue[tuple[str, object | None]] = queue.Queue()
         self._scan_result_queue: queue.Queue[tuple[bool, str, str]] = queue.Queue()
         self._scan_button: ttk.Button | None = None
         self._scan_status: tk.Label | None = None
@@ -331,7 +336,9 @@ class SystemDiagnosticsApp:
             ("Desinstalar Anota AI", self._uninstall_anota),
             ("Baixar Anota AI Desktop", self._download_desktop),
         ]
-        results_frame = self._build_action_screen(body, "program", definitions)
+        results_frame = self._build_action_screen(
+            body, "program", definitions, with_progress=True
+        )
         self._build_scan_card(results_frame)
 
     def _build_run_all_card(self, body: tk.Frame) -> None:
@@ -420,7 +427,7 @@ class SystemDiagnosticsApp:
             ("Baixar Instalador de Drivers", self._download_driver),
             ("Baixar NetStatGUI", self._download_netstatgui),
         ]
-        self._build_action_screen(body, "printer", definitions)
+        self._build_action_screen(body, "printer", definitions, with_progress=True)
 
     def _build_network_frame(self) -> None:
         _, body = self._build_screen_shell(self.network_frame, "Rede — Anota AI")
@@ -645,13 +652,14 @@ class SystemDiagnosticsApp:
         output.pack(fill="both", expand=True)
         scrollbar.grid(row=row, column=1, sticky="ns")
         self._outputs[screen] = output
+        self._output_frames[screen] = output_frame
+        self._output_scrollbars[screen] = scrollbar
         if with_progress:
-            self._output_frame = output_frame
-        if with_progress:
-            self._progress_frame = progress_frame
-            self._progress_label = progress_label
-            self._progress_bar = progress_bar
-            self._output_scrollbar = scrollbar
+            # Cada tela mantém seus próprios widgets para que um download não
+            # reutilize a barra da tela Computador por engano.
+            self._progress_frames[screen] = progress_frame
+            self._progress_labels[screen] = progress_label
+            self._progress_bars[screen] = progress_bar
         return results_frame
 
     def _show_frame(self, frame: tk.Frame) -> None:
@@ -697,28 +705,46 @@ class SystemDiagnosticsApp:
         output.configure(state="disabled")
 
     def _show_progress(self, label_text: str, total: int) -> None:
-        output = self._outputs["computer"]
+        screen = self._active_screen
+        output = self._outputs[screen]
         output.configure(state="normal")
         output.delete("1.0", "end")
         output.configure(state="disabled")
-        self._output_frame.grid_remove()
-        self._output_scrollbar.grid_remove()
+        output_frame = self._output_frames.get(screen)
+        output_scrollbar = self._output_scrollbars.get(screen)
+        progress_frame = self._progress_frames.get(screen)
+        progress_label = self._progress_labels.get(screen)
+        progress_bar = self._progress_bars.get(screen)
+        if not all((output_frame, progress_frame, progress_label, progress_bar)):
+            return
+        output_frame.grid_remove()
+        if output_scrollbar:
+            output_scrollbar.grid_remove()
         self._progress_total = total
         self._progress_current = 0
-        self._progress_label.configure(text=f"Executando: {label_text}...")
-        self._progress_frame.grid()
+        progress_label.configure(text=f"Executando: {label_text}...")
+        progress_frame.grid()
         if total:
-            self._progress_bar.stop()
-            self._progress_bar.configure(mode="determinate", maximum=total, value=0)
+            progress_bar.stop()
+            progress_bar.configure(mode="determinate", maximum=total, value=0)
         else:
-            self._progress_bar.configure(mode="indeterminate", value=0)
-            self._progress_bar.start(10)
+            progress_bar.configure(mode="indeterminate", value=0)
+            progress_bar.start(10)
 
     def _hide_progress(self) -> None:
-        self._progress_bar.stop()
-        self._progress_frame.grid_remove()
-        self._output_frame.grid(row=1, column=0, sticky="nsew")
-        self._output_scrollbar.grid(row=1, column=1, sticky="ns")
+        screen = self._active_screen
+        progress_bar = self._progress_bars.get(screen)
+        progress_frame = self._progress_frames.get(screen)
+        output_frame = self._output_frames.get(screen)
+        output_scrollbar = self._output_scrollbars.get(screen)
+        if progress_bar:
+            progress_bar.stop()
+        if progress_frame:
+            progress_frame.grid_remove()
+        if output_frame:
+            output_frame.grid(row=1, column=0, sticky="nsew")
+        if output_scrollbar:
+            output_scrollbar.grid(row=1, column=1, sticky="ns")
 
     def _progress_name(self, section_title: str) -> str:
         names = {
@@ -797,16 +823,22 @@ class SystemDiagnosticsApp:
             if self._active_screen == "computer":
                 progress_name = self._progress_name(payload)
                 next_step = min(self._progress_current + 1, self._progress_total)
-                self._progress_label.configure(
-                    text=f"Executando: {progress_name}... ({next_step}/{self._progress_total})"
-                )
+                progress_label = self._progress_labels.get(self._active_screen)
+                if progress_label:
+                    progress_label.configure(
+                        text=f"Executando: {progress_name}... ({next_step}/{self._progress_total})"
+                    )
         elif message_type == "output" and payload:
             self._pending_tool_output += payload
             if self._active_screen == "computer":
                 self._progress_current = min(self._progress_current + 1, self._progress_total)
-                self._progress_bar.configure(
-                    mode="determinate", maximum=self._progress_total, value=self._progress_current
-                )
+                progress_bar = self._progress_bars.get(self._active_screen)
+                if progress_bar:
+                    progress_bar.configure(
+                        mode="determinate",
+                        maximum=self._progress_total,
+                        value=self._progress_current,
+                    )
         elif message_type == "done":
             self._append_output(self._active_screen, self._pending_tool_output)
             if self._active_screen == "computer":
@@ -993,6 +1025,47 @@ class SystemDiagnosticsApp:
                 break
             if message_type == "output" and payload:
                 self._append_command_output(payload)
+            elif message_type == "progress_start":
+                screen = self._active_screen
+                output_frame = self._output_frames.get(screen)
+                scrollbar = self._output_scrollbars.get(screen)
+                frame = self._progress_frames.get(screen)
+                bar = self._progress_bars.get(screen)
+                label = self._progress_labels.get(screen)
+                if frame and bar and label:
+                    if output_frame:
+                        output_frame.grid_remove()
+                    if scrollbar:
+                        scrollbar.grid_remove()
+                    frame.grid()
+                    bar.stop()
+                    bar.configure(mode="determinate", maximum=100, value=0)
+                    label.configure(text="Baixando... 0%")
+            elif message_type == "progress" and isinstance(payload, dict):
+                screen = self._active_screen
+                bar = self._progress_bars.get(screen)
+                label = self._progress_labels.get(screen)
+                frame = self._progress_frames.get(screen)
+                output_frame = self._output_frames.get(screen)
+                scrollbar = self._output_scrollbars.get(screen)
+                if bar and label and frame:
+                    if output_frame:
+                        output_frame.grid_remove()
+                    if scrollbar:
+                        scrollbar.grid_remove()
+                    frame.grid()
+                    percent = int(payload.get("percent", 0))
+                    downloaded_mb = float(payload.get("downloaded_mb", 0))
+                    total_mb = float(payload.get("total_mb", 0))
+                    bar.configure(mode="determinate", maximum=100, value=percent)
+                    label.configure(
+                        text=(
+                            f"Baixando... {percent}% "
+                            f"({downloaded_mb:.1f} MB / {total_mb:.1f} MB)"
+                        )
+                    )
+            elif message_type == "progress_done":
+                self._hide_progress()
             elif message_type == "done":
                 finished = True
         if finished:
@@ -1112,7 +1185,7 @@ class SystemDiagnosticsApp:
             log_audit("download_failed", f"Erro: {error}")
             self._queue_command_output(f"Erro ao baixar: {error}")
             return
-        self._queue_command_output(message)
+        self._command_result_queue.put(("progress_start", None))
 
         def reporthook(block_number: int, block_size: int, total_size: int) -> None:
             downloaded = block_number * block_size
@@ -1120,19 +1193,28 @@ class SystemDiagnosticsApp:
                 percent = min(100, int(downloaded * 100 / total_size))
                 total_mb = total_size / (1024 * 1024)
                 downloaded_mb = min(downloaded, total_size) / (1024 * 1024)
-                self._queue_command_output(
-                    f"Baixando... {percent}% ({downloaded_mb:.1f} MB / {total_mb:.1f} MB)"
-                )
             else:
-                self._queue_command_output("Baixando...")
+                percent = 0
+                total_mb = 0
+                downloaded_mb = 0
+            self._command_result_queue.put(
+                ("progress", {
+                    "percent": percent,
+                    "downloaded_mb": downloaded_mb,
+                    "total_mb": total_mb,
+                    "label": message,
+                })
+            )
 
         try:
             urllib.request.urlretrieve(url, destination, reporthook=reporthook)
             sha256 = calculate_sha256(destination)
         except Exception as error:
             log_audit("download_failed", f"Erro: {error}")
+            self._command_result_queue.put(("progress_done", None))
             self._queue_command_output(f"Erro ao baixar: {error}")
             return
+        self._command_result_queue.put(("progress_done", None))
         log_audit("download_complete", f"Arquivo: {destination}, SHA-256: {sha256}")
         self._queue_command_output(f"Download concluído: {destination}")
         self._queue_command_output(f"SHA-256: {sha256}")
