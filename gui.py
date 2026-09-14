@@ -34,8 +34,8 @@ if sys.stderr is None:
     sys.stderr = io.StringIO()
 
 from modules.compatibility_check import display_compatibility_check
-from modules.cpu_monitor import monitor_cpu
 from modules.datetime_sync import display_datetime_sync
+from modules.resource_monitor import show_resource_monitor
 from modules.speedtest import display_speed_test
 from modules.temp_cleaner import display_temp_cleaner
 from modules.system_info import collect_system_info, display_system_info
@@ -324,7 +324,7 @@ class SystemDiagnosticsApp:
             ("Sincronização de Hora", self._sync_time),
             ("Compatibilidade", self._check_compatibility),
             ("Teste de Velocidade", self._speed_test),
-            ("Monitor de CPU", self._monitor_cpu),
+            ("Monitor de Recursos", self._monitor_cpu),
             ("Verificar Antivírus", self._check_antivirus),
             ("Verificar Inicialização", self._check_startup),
             ("Informações do Sistema", self._show_system_info),
@@ -759,7 +759,6 @@ class SystemDiagnosticsApp:
             "SINCRONIZAÇÃO DE HORA": "Sincronizando hora",
             "VERIFICAÇÃO DE COMPATIBILIDADE": "Verificando compatibilidade",
             "TESTE DE VELOCIDADE": "Testando velocidade",
-            "MONITOR DE CPU": "Monitorando CPU",
             "PROCESSOS ATIVOS DO ANOTA AI": "Verificando processos do Anota AI",
             "VERSÃO INSTALADA DO ANOTA AI": "Verificando versão instalada",
             "LOGS DO ANOTA AI": "Lendo logs do Anota AI",
@@ -815,7 +814,7 @@ class SystemDiagnosticsApp:
             self._result_queue.put(
                 (
                     "output",
-                    f"\n{'=' * 59}\n{title}\n{'=' * 59}\n"
+                    f"\n{'=' *59}\n{title}\n{'=' * 59}\n"
                     f"{captured.getvalue()}\n{'-' * 59}\n",
                 )
             )
@@ -877,10 +876,7 @@ class SystemDiagnosticsApp:
         )
 
     def _monitor_cpu(self) -> None:
-        self._start_operation(
-            "Monitor de CPU",
-            [("MONITOR DE CPU", lambda: monitor_cpu(duration=10, interval=1.0))],
-        )
+        show_resource_monitor(self.root)
 
     def _show_system_info(self) -> None:
         self._start_operation(
@@ -930,7 +926,6 @@ class SystemDiagnosticsApp:
                 ("SINCRONIZAÇÃO DE HORA", display_datetime_sync),
                 ("VERIFICAÇÃO DE COMPATIBILIDADE", display_compatibility_check),
                 ("TESTE DE VELOCIDADE", display_speed_test),
-                ("MONITOR DE CPU", lambda: monitor_cpu(duration=10, interval=1.0)),
                 ("STATUS DO ANTIVÍRUS", display_antivirus_status),
                 ("PROGRAMAS NA INICIALIZAÇÃO", display_startup_programs),
                 ("INFORMAÇÕES DO SISTEMA", display_system_info),
