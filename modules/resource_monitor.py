@@ -44,32 +44,24 @@ class ResourceMonitorWidget:
         )
         self._prev_disk_bytes: tuple[int, int] | None = None
 
-        self._running = False
-        self._after_id: str | None = None
         self._build_ui()
-        self._start()
+        self._running = True
+        self._after_id: str | None = None
+        self._update()
 
     def _build_ui(self) -> None:
         """Constrói os cartões de CPU, memória e disco no container."""
-        # Barra de botões no topo: Iniciar / Parar.
+        # Botão Parar no topo.
         button_bar = tk.Frame(self.container, bg=BG_WHITE)
         button_bar.pack(fill="x", padx=10, pady=(10, 5))
 
-        self._start_btn = ttk.Button(
-            button_bar,
-            text="Iniciar",
-            command=self._start,
-            style="Rounded.TButton",
-        )
-        self._start_btn.pack(side="left", padx=(0, 8))
-
-        self._stop_btn = ttk.Button(
+        stop_top_btn = ttk.Button(
             button_bar,
             text="Parar",
-            command=self._stop,
+            command=self._close,
             style="Rounded.TButton",
         )
-        self._stop_btn.pack(side="left")
+        stop_top_btn.pack(side="left")
 
         # Canvas com scrollbar para comportar os três gráficos e o botão.
         canvas = tk.Canvas(
@@ -177,26 +169,6 @@ class ResourceMonitorWidget:
             self._disk_value = value_label
             self._disk_detail = detail_label
             self._disk_color = color
-
-    def _start(self) -> None:
-        """Inicia o monitoramento em tempo real."""
-        if self._running:
-            return
-        self._running = True
-        self._start_btn.configure(state="disabled")
-        self._stop_btn.configure(state="normal")
-        self._update()
-
-    def _stop(self) -> None:
-        """Pausa o monitoramento sem fechar o monitor."""
-        if not self._running:
-            return
-        self._running = False
-        if self._after_id is not None:
-            self.container.after_cancel(self._after_id)
-            self._after_id = None
-        self._start_btn.configure(state="normal")
-        self._stop_btn.configure(state="disabled")
 
     def _update(self) -> None:
         """Coleta dados e redesenha os gráficos a cada segundo."""
