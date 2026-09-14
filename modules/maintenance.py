@@ -2,12 +2,8 @@
 
 from __future__ import annotations
 
-import os
 import platform
 import subprocess
-from pathlib import Path
-
-from .anota_process import find_anota_executable
 
 
 def _creation_flags() -> int:
@@ -30,8 +26,6 @@ def _powershell(command: str, args: list[str] | None = None, timeout: int = 30) 
 
 
 def display_antivirus_status() -> None:
-    print("STATUS DO ANTIVÍRUS")
-    print("-" * 64)
     if platform.system() != "Windows":
         print("Disponível apenas no Windows.")
         return
@@ -46,35 +40,8 @@ def display_antivirus_status() -> None:
         print("Aviso: a proteção pode estar desativada ou outro antivírus pode estar interferindo.")
 
 
-def repair_shortcut() -> str:
-    """Cria/recria o atalho Anota AI na área de trabalho."""
-    if platform.system() != "Windows":
-        return "Disponível apenas no Windows."
-    executable = find_anota_executable()
-    if executable is None:
-        return "Não foi possível reparar o atalho: executável do Anota AI não encontrado."
-    desktop = Path(os.environ.get("USERPROFILE", str(Path.home()))) / "Desktop"
-    shortcut = desktop / "Anota AI.lnk"
-    command = (
-        "$ws = New-Object -ComObject WScript.Shell; "
-        "$s = $ws.CreateShortcut($args[0]); "
-        "$s.TargetPath = $args[1]; $s.WorkingDirectory = Split-Path $args[1]; $s.Save()"
-    )
-    result = _powershell(command, [str(shortcut), str(executable)])
-    if result.startswith("Erro ao executar"):
-        return result
-    return f"Atalho reparado: {shortcut}\nDestino: {executable}"
-
-
-def display_repair_shortcut() -> None:
-    print("REPARAR ATALHO")
-    print("-" * 64)
-    print(repair_shortcut())
-
 
 def display_startup_programs() -> None:
-    print("PROGRAMAS NA INICIALIZAÇÃO DO WINDOWS")
-    print("-" * 64)
     if platform.system() != "Windows":
         print("Disponível apenas no Windows.")
         return

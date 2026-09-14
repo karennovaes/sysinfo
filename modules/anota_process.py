@@ -6,6 +6,7 @@ import os
 import platform
 import re
 import subprocess
+import sys
 import time
 from pathlib import Path
 from typing import Iterable
@@ -19,6 +20,7 @@ def _creation_flags() -> int:
 
 
 _EXECUTABLE_NAMES = (
+    "AnotaAIResponde.exe",
     "anotaai.exe",
     "anota-ai.exe",
     "anotaai-desktop.exe",
@@ -30,7 +32,7 @@ def _normalise_name(value: str) -> str:
     return value.casefold().replace(" ", "").replace("-", "")
 
 
-_ANOTA_NAME_MARKERS = ("anota", "anotaai", "anota ai", "anotaresponde")
+_ANOTA_NAME_MARKERS = ("anotaairesponde", "anota", "anotaai", "anota ai", "anotaresponde")
 
 
 def _contains_anota_name(value: str) -> bool:
@@ -40,16 +42,13 @@ def _contains_anota_name(value: str) -> bool:
 
 
 def _scan_roots() -> list[Path]:
-    """Monta os diretórios de instalação sem depender de uma unidade fixa."""
+    """Retorna apenas os diretórios de instalação do Windows (Program Files)."""
     values = [
         os.environ.get("PROGRAMFILES(X86)"),
         os.environ.get("PROGRAMFILES"),
-        os.environ.get("LOCALAPPDATA"),
-        os.environ.get("APPDATA"),
+        r"C:\Program Files (x86)",
+        r"C:\Program Files",
     ]
-    # Em instalações Windows, estas pastas continuam sendo úteis mesmo quando
-    # o processo foi iniciado por um usuário com variáveis incompletas.
-    values.extend((r"C:\Program Files (x86)", r"C:\Program Files"))
     roots: list[Path] = []
     seen: set[str] = set()
     for value in values:
@@ -63,23 +62,45 @@ def _scan_roots() -> list[Path]:
     return roots
 
 
-def _read_wmic_version(executable: Path) -> str:
-    """Obtém a versão do executável com WMIC, sem abrir uma janela de console."""
+def _read_version(executable: Path) -> str:
+    """Obtém a versão do executável usando PowerShell, com fallback para WMIC."""
     if platform.system() != "Windows":
         return "Não disponível neste sistema"
-    escaped_path = str(executable).replace("\\", "\\\\")
-    command = [
-        "wmic",
-        "datafile",
-        "where",
-        f"name='{escaped_path}'",
-        "get",
-        "Version",
-        "/value",
-    ]
+
+    # O WMIC foi removido de versões recentes do Windows 11. PowerShell usa
+    # diretamente os metadados do arquivo e lida melhor com caminhos longos.
+    escaped_powershell_path = str(executable).replace("'", "''")
     try:
         result = subprocess.run(
-            command,
+            [
+                "powershell",
+                "-Command",
+                f"(Get-Item '{escaped_powershell_path}').VersionInfo.ProductVersion",
+            ],
+            capture_output=True,
+            text=True,
+            timeout=15,
+            check=False,
+            creationflags=_creation_flags(),
+        )
+        if result.returncode == 0 and result.stdout.strip():
+            return result.stdout.strip()
+    except (OSError, subprocess.SubprocessError):
+        pass
+
+    # Fallback para instalações mais antigas do Windows que ainda possuem WMIC.
+    escaped_path = str(executable).replace("\\", "\\\\")
+    try:
+        result = subprocess.run(
+            [
+                "wmic",
+                "datafile",
+                "where",
+                f"name='{escaped_path}'",
+                "get",
+                "Version",
+                "/value",
+            ],
             capture_output=True,
             text=True,
             timeout=15,
@@ -87,18 +108,20 @@ def _read_wmic_version(executable: Path) -> str:
             creationflags=_creation_flags(),
         )
     except (OSError, subprocess.SubprocessError):
-        return "Não informado"
-    output = (result.stdout or "") + "\n" + (result.stderr or "")
-    match = re.search(r"(?im)^\s*Version\s*=\s*([^\r\n]+)", output)
-    if match:
-        return match.group(1).strip()
-    # Algumas versões do WMIC imprimem o cabeçalho e o valor em linhas
-    # separadas, então preservamos esse formato como fallback.
-    lines = [line.strip() for line in output.splitlines() if line.strip()]
-    for index, line in enumerate(lines[:-1]):
-        if line.casefold() == "version" and lines[index + 1]:
-            return lines[index + 1]
-    return "Não informado"
+        pass
+    else:
+        if result.returncode == 0:
+            output = (result.stdout or "") + "\n" + (result.stderr or "")
+            match = re.search(r"(?im)^\s*Version\s*=\s*([^\r\n]+)", output)
+            if match:
+                return match.group(1).strip()
+            # Algumas versões do WMIC imprimem cabeçalho e valor em linhas
+            # separadas.
+            lines = [line.strip() for line in output.splitlines() if line.strip()]
+            for index, line in enumerate(lines[:-1]):
+                if line.casefold() == "version" and lines[index + 1]:
+                    return lines[index + 1]
+    return "Versão não encontrada"
 
 
 def _find_anota_executable(folder: Path) -> Path | None:
@@ -116,7 +139,7 @@ def scan_anota_installation() -> tuple[bool, str, str]:
     O retorno é ``(encontrado, caminho, versão)``. Pastas com nome relacionado
     ao Anota AI também são consideradas instalações; quando há um executável
     dentro delas, o caminho retornado é o executável e sua versão é consultada
-    com WMIC.
+    com PowerShell.
     """
     matching_folder: Path | None = None
     for root in _scan_roots():
@@ -125,10 +148,10 @@ def scan_anota_installation() -> tuple[bool, str, str]:
         try:
             # Aceita também uma raiz que já seja a pasta do aplicativo.
             # Os diretórios abaixo continuam sendo percorridos normalmente.
-            if _contains_anota_name(root.name):
+            if _contains_anota_name(root.name) and not _is_self_path(root):
                 executable = _find_anota_executable(root)
-                if executable is not None:
-                    return True, str(executable), _read_wmic_version(executable)
+                if executable is not None and not _is_self_path(executable):
+                    return True, str(executable), _read_version(executable)
                 matching_folder = root
             for current, directories, files in os.walk(root, topdown=True, followlinks=False):
                 current_path = Path(current)
@@ -136,14 +159,14 @@ def scan_anota_installation() -> tuple[bool, str, str]:
                 # versão real instalada no cartão da interface.
                 for filename in files:
                     candidate = current_path / filename
-                    if candidate.suffix.casefold() == ".exe" and _contains_anota_name(filename):
-                        return True, str(candidate), _read_wmic_version(candidate)
+                    if candidate.suffix.casefold() == ".exe" and _contains_anota_name(filename) and not _is_self_path(candidate):
+                        return True, str(candidate), _read_version(candidate)
                 for directory in directories:
-                    if _contains_anota_name(directory) and matching_folder is None:
+                    if _contains_anota_name(directory) and matching_folder is None and not _is_self_path(current_path / directory):
                         folder = current_path / directory
                         executable = _find_anota_executable(folder)
-                        if executable is not None:
-                            return True, str(executable), _read_wmic_version(executable)
+                        if executable is not None and not _is_self_path(executable):
+                            return True, str(executable), _read_version(executable)
                         matching_folder = folder
         except (OSError, PermissionError):
             continue
@@ -152,8 +175,30 @@ def scan_anota_installation() -> tuple[bool, str, str]:
     return False, "", ""
 
 
+_SELF_EXCLUDE_MARKERS = ("diagnostico", "sysinfo", "suporte tools")
+
+def _is_self_process(name: str, pid: int) -> bool:
+    """Identifica o próprio utilitário para nao matá-lo acidentalmente."""
+    normalised = name.casefold()
+    if pid == os.getpid():
+        return True
+    return any(marker in normalised for marker in _SELF_EXCLUDE_MARKERS)
+
+
+def _is_self_path(path: Path | str) -> bool:
+    """Identifica arquivos/pastas do próprio utilitário para o scanner nao os confundir com o Anota AI."""
+    normalised = str(path).casefold()
+    # Compara tambem com o executável em execução.
+    try:
+        if os.path.samefile(path, sys.executable):
+            return True
+    except (OSError, ValueError):
+        pass
+    return any(marker in normalised for marker in _SELF_EXCLUDE_MARKERS)
+
+
 def list_anota_processes() -> list[dict[str, str | int]]:
-    """Retorna processos cujo nome contém ``anota``."""
+    """Retorna processos cujo nome contém ``anota`` (excluindo o próprio utilitário)."""
     processes: list[dict[str, str | int]] = []
     try:
         iterator = psutil.process_iter(["pid", "name", "status"])
@@ -163,9 +208,12 @@ def list_anota_processes() -> list[dict[str, str | int]]:
                 name = str(info.get("name") or "")
                 if "anota" not in name.casefold():
                     continue
+                pid = info.get("pid", process.pid)
+                if _is_self_process(name, pid):
+                    continue
                 status = str(info.get("status") or "unknown")
                 state = "running" if status == psutil.STATUS_RUNNING else "not responding"
-                processes.append({"pid": info.get("pid", process.pid), "name": name, "status": state})
+                processes.append({"pid": pid, "name": name, "status": state})
             except (psutil.NoSuchProcess, psutil.AccessDenied, psutil.ZombieProcess):
                 continue
     except (OSError, RuntimeError):
@@ -191,6 +239,8 @@ def kill_anota_processes() -> int:
     for process in processes:
         name = str(process.get("name") or "").strip()
         if not name:
+            continue
+        if _is_self_process(name, int(process.get("pid", 0))):
             continue
         key = name.casefold()
         if key not in process_count_by_name:
@@ -219,8 +269,6 @@ def kill_anota_processes() -> int:
 def display_anota_processes() -> None:
     """Imprime os processos do Anota AI em formato adequado ao terminal."""
     processes = list_anota_processes()
-    print("PROCESSOS ATIVOS DO ANOTA AI")
-    print("-" * 64)
     if not processes:
         print("O Anota AI Desktop não está rodando.")
         return
@@ -270,6 +318,8 @@ def find_anota_executable() -> Path | None:
         for path in (
             r"C:\Program Files\Anota AI",
             r"C:\Program Files (x86)\Anota AI",
+            r"C:\Program Files\AnotaAIResponde",
+            r"C:\Program Files (x86)\AnotaAIResponde",
             r"C:\Users\Public\Desktop",
         )
     )
@@ -281,6 +331,9 @@ def find_anota_executable() -> Path | None:
             if direct.is_file():
                 return direct
             nested = root / "anotaai" / name
+            if nested.is_file():
+                return nested
+            nested = root / "AnotaAIResponde" / name
             if nested.is_file():
                 return nested
 
@@ -340,12 +393,8 @@ def installed_version() -> str:
 
 
 def display_restart_anota() -> None:
-    print("REINICIAR ANOTA AI")
-    print("-" * 64)
     print(restart_anota())
 
 
 def display_installed_version() -> None:
-    print("VERSÃO INSTALADA DO ANOTA AI")
-    print("-" * 64)
     print(installed_version())

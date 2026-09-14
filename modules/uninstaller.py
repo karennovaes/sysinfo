@@ -16,18 +16,9 @@ import time
 from pathlib import Path
 from typing import Iterable
 
-try:
-    from tkinter import messagebox
-except ImportError:  # pragma: no cover - Tk pode não existir em ambientes de CI
-    messagebox = None  # type: ignore[assignment]
-
 from .anota_process import kill_anota_processes, scan_anota_installation
 from .temp_cleaner import clean_temp
 
-_CONFIRMATION = (
-    "Tem certeza que deseja desinstalar completamente o Anota AI? "
-    "Esta ação não pode ser desfeita."
-)
 _UNINSTALLER_NAMES = ("uninstall.exe", "unins000.exe")
 _GREEN = "\033[92m"
 _RESET = "\033[0m"
@@ -124,6 +115,11 @@ def _installation_paths(scanner_path: str) -> list[Path]:
     """Retorna instalações fixas e, quando seguro, a pasta do scanner."""
     paths: list[Path | None] = [
         _installation_folder(scanner_path),
+        Path(r"C:\Program Files (x86)\AnotaAIResponde"),
+        Path(r"C:\Program Files\AnotaAIResponde"),
+        _path_from_env("PROGRAMFILES(X86)", "AnotaAIResponde"),
+        _path_from_env("PROGRAMFILES", "AnotaAIResponde"),
+        _path_from_env("LOCALAPPDATA", "AnotaAIResponde"),
         Path(r"C:\Program Files (x86)\anotaai"),
         Path(r"C:\Program Files\anotaai"),
         _path_from_env("PROGRAMFILES(X86)", "anotaai"),
@@ -138,8 +134,10 @@ def _application_data_paths() -> list[Path]:
     return _unique_paths(
         [
             _path_from_env("APPDATA", "anotaairesponde"),
+            _path_from_env("APPDATA", "AnotaAIResponde"),
             _path_from_env("APPDATA", "anota ai"),
             _path_from_env("LOCALAPPDATA", "anotaairesponde"),
+            _path_from_env("LOCALAPPDATA", "AnotaAIResponde"),
         ]
     )
 
@@ -149,8 +147,10 @@ def _registry_keys() -> tuple[str, ...]:
         r"HKCU\Software\anotaai",
         r"HKCU\Software\anota ai",
         r"HKCU\Software\anotaairesponde",
+        r"HKCU\Software\AnotaAIResponde",
         r"HKLM\Software\anotaai",
         r"HKLM\Software\anota ai",
+        r"HKLM\Software\AnotaAIResponde",
     )
 
 
@@ -181,9 +181,16 @@ def _shortcut_paths() -> list[Path]:
             [
                 desktop / "Anota AI.lnk" if desktop else None,
                 desktop / "Anota AI Desktop.lnk" if desktop else None,
+                desktop / "AnotaAIResponde.lnk" if desktop else None,
+                desktop / "AnotaAIResponde Desktop.lnk" if desktop else None,
             ]
         )
     )
+    if desktop and desktop.is_dir():
+        try:
+            paths.extend(item for item in desktop.glob("AnotaAIResponde*") if item.exists())
+        except OSError:
+            pass
     for root in (
         _path_from_env("APPDATA", "Microsoft", "Windows", "Start Menu", "Programs"),
         _path_from_env("PROGRAMDATA", "Microsoft", "Windows", "Start Menu", "Programs"),
@@ -192,6 +199,7 @@ def _shortcut_paths() -> list[Path]:
             continue
         try:
             paths.extend(item for item in root.glob("Anota AI*") if item.exists())
+            paths.extend(item for item in root.glob("AnotaAIResponde*") if item.exists())
         except OSError:
             continue
     return _unique_paths(paths)
@@ -225,8 +233,6 @@ def _print_report(
     temp_result: dict[str, object],
 ) -> None:
     """Imprime o relatório final sem expor o caminho detectado pelo scanner."""
-    print("\nRELATÓRIO FINAL — DESINSTALAÇÃO DO ANOTA AI")
-    print("-" * 64)
     print(f"Processos finalizados: {processes_killed}")
     print(f"Desinstalador executado: {'sim' if official_uninstaller else 'não'}")
     print("Pastas removidas:")
@@ -253,15 +259,11 @@ def _print_report(
 
 
 def display_uninstall() -> None:
-    """Confirma e executa a desinstalação completa do Anota AI."""
-    if messagebox is None:
-        print("Desinstalação cancelada: tkinter não está disponível.")
-        return
-    if not messagebox.askyesno("Desinstalar Anota AI", _CONFIRMATION):
-        print("Desinstalação cancelada pelo usuário.")
-        return
+    """Executa a desinstalação completa do Anota AI.
 
-    print("DESINSTALAÇÃO COMPLETA DO ANOTA AI")
+    A confirmação é responsabilidade da interface gráfica e deve ocorrer na
+    thread principal, antes de esta função ser executada pelo worker.
+    """
     print("[1/8] Finalizando processos do Anota AI...")
     if platform.system() != "Windows":
         print("Disponível apenas no Windows.")

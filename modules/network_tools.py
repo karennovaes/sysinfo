@@ -27,8 +27,6 @@ def _run(command: list[str], timeout: int = 30) -> subprocess.CompletedProcess[s
 
 
 def display_flush_dns() -> None:
-    print("FLUSH DNS")
-    print("-" * 64)
     if platform.system() != "Windows":
         print("Disponível apenas no Windows.")
         return
@@ -51,8 +49,6 @@ def _profile_states(output: str) -> list[tuple[str, str]]:
 
 
 def display_firewall_status() -> None:
-    print("STATUS DO FIREWALL")
-    print("-" * 64)
     if platform.system() != "Windows":
         print("Disponível apenas no Windows.")
         return
@@ -71,8 +67,6 @@ def display_firewall_status() -> None:
 
 
 def display_anota_connection() -> None:
-    print("TESTE DE CONEXÃO ANOTA AI")
-    print("-" * 64)
     command = ["ping", "app.anota.ai", "-n", "4"] if platform.system() == "Windows" else ["ping", "-c", "4", "app.anota.ai"]
     result = _run(command, timeout=30)
     if result is None:
