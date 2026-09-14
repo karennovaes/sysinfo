@@ -57,6 +57,7 @@ from modules.network_tools import (
     display_flush_dns,
 )
 from modules.theme import *
+from modules.config import *
 
 Action = Callable[[], None]
 Section = tuple[str, Action]
@@ -143,19 +144,6 @@ def _clear_print_queue() -> str:
 
 class SystemDiagnosticsApp:
     """Janela principal com menu inicial e quatro telas de comandos."""
-
-    PRINTERS_COMMAND = "shell:::{A8A91A66-3A7D-4424-8D24-04E180695C7A}"
-    DRIVER_URL = (
-        "https://raw.githubusercontent.com/Delutto/instalador_universal/main/"
-        "Output/Instalador_Universal_0.9.4.exe"
-    )
-    DRIVER_FILENAME = "Instalador_Universal_0.9.4.exe"
-    DESKTOP_URL = "https://app.anota.ai/download-app/anotaai-desktop"
-    DESKTOP_FILENAME = "anotaai-desktop.exe"
-    NETSTATGUI_URL = (
-        "https://raw.githubusercontent.com/Delutto/NetStatGUI/main/bin/NetStatGUI.exe"
-    )
-    NETSTATGUI_FILENAME = "NetStatGUI.exe"
 
     def __init__(self, root: tk.Tk) -> None:
         self.root = root
@@ -1081,7 +1069,7 @@ class SystemDiagnosticsApp:
         if platform.system() != "Windows":
             self._queue_command_output("Disponível apenas no Windows")
             return
-        subprocess.Popen(["explorer", self.PRINTERS_COMMAND], creationflags=_creation_flags())
+        subprocess.Popen(["explorer", PRINTERS_COMMAND], creationflags=_creation_flags())
         self._queue_command_output("Abrindo pasta de Impressoras...")
 
     def _clear_printer_queue(self) -> None:
@@ -1152,21 +1140,21 @@ class SystemDiagnosticsApp:
     def _download_driver(self) -> None:
         self._start_command_thread(
             "printer", "Baixar Instalador de Drivers", lambda: self._download_file(
-                self.DRIVER_URL, self.DRIVER_FILENAME, "Baixando Instalador de Drivers..."
+                DRIVER_URL, DRIVER_FILENAME, "Baixando Instalador de Drivers..."
             )
         )
 
     def _download_desktop(self) -> None:
         self._start_command_thread(
             "program", "Baixar Anota AI Desktop", lambda: self._download_file(
-                self.DESKTOP_URL, self.DESKTOP_FILENAME, "Baixando Anota AI Desktop..."
+                DESKTOP_URL, DESKTOP_FILENAME, "Baixando Anota AI Desktop..."
             )
         )
 
     def _download_netstatgui(self) -> None:
         self._start_command_thread(
             "printer", "Baixar NetStatGUI", lambda: self._download_file(
-                self.NETSTATGUI_URL, self.NETSTATGUI_FILENAME, "Baixando NetStatGUI..."
+                NETSTATGUI_URL, NETSTATGUI_FILENAME, "Baixando NetStatGUI..."
             )
         )
 
