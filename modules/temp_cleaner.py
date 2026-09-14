@@ -96,9 +96,9 @@ def _clean_directory(path: str) -> dict[str, Any]:
 
 def clean_temp() -> dict[str, Any]:
     """Limpa temporários e o cache do Anota AI e retorna estatísticas."""
-    user_path = os.environ.get("TEMP", "")
+    user_path = os.environ.get("TEMP", "%TEMP%", "")
     system_path = r"C:\Windows\Temp"
-    appdata_path = os.environ.get("APPDATA", "")
+    appdata_path = os.environ.get("APPDATA", "%APPDATA%", "")
     anota_cache_path = os.path.join(appdata_path, "anotaairesponde")
 
     result = {
