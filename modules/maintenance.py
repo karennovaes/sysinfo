@@ -26,8 +26,6 @@ def _powershell(command: str, args: list[str] | None = None, timeout: int = 30) 
 
 
 def display_antivirus_status() -> None:
-    print("STATUS DO ANTIVÍRUS")
-    print("-" * 64)
     if platform.system() != "Windows":
         print("Disponível apenas no Windows.")
         return
@@ -44,8 +42,6 @@ def display_antivirus_status() -> None:
 
 
 def display_startup_programs() -> None:
-    print("PROGRAMAS NA INICIALIZAÇÃO DO WINDOWS")
-    print("-" * 64)
     if platform.system() != "Windows":
         print("Disponível apenas no Windows.")
         return

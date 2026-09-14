@@ -233,8 +233,6 @@ def _print_report(
     temp_result: dict[str, object],
 ) -> None:
     """Imprime o relatório final sem expor o caminho detectado pelo scanner."""
-    print("\nRELATÓRIO FINAL — DESINSTALAÇÃO DO ANOTA AI")
-    print("-" * 64)
     print(f"Processos finalizados: {processes_killed}")
     print(f"Desinstalador executado: {'sim' if official_uninstaller else 'não'}")
     print("Pastas removidas:")
@@ -266,7 +264,6 @@ def display_uninstall() -> None:
     A confirmação é responsabilidade da interface gráfica e deve ocorrer na
     thread principal, antes de esta função ser executada pelo worker.
     """
-    print("DESINSTALAÇÃO COMPLETA DO ANOTA AI")
     print("[1/8] Finalizando processos do Anota AI...")
     if platform.system() != "Windows":
         print("Disponível apenas no Windows.")

@@ -56,8 +56,6 @@ def recent_error_lines(limit: int = 10) -> tuple[Path | None, list[str]]:
 
 def display_anota_logs() -> None:
     log_path = find_latest_log()
-    print("LOGS DO ANOTA AI")
-    print("-" * 64)
     if log_path is None:
         print("Nenhum arquivo de log foi encontrado.")
         return

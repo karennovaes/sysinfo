@@ -269,8 +269,6 @@ def kill_anota_processes() -> int:
 def display_anota_processes() -> None:
     """Imprime os processos do Anota AI em formato adequado ao terminal."""
     processes = list_anota_processes()
-    print("PROCESSOS ATIVOS DO ANOTA AI")
-    print("-" * 64)
     if not processes:
         print("O Anota AI Desktop não está rodando.")
         return
@@ -395,12 +393,8 @@ def installed_version() -> str:
 
 
 def display_restart_anota() -> None:
-    print("REINICIAR ANOTA AI")
-    print("-" * 64)
     print(restart_anota())
 
 
 def display_installed_version() -> None:
-    print("VERSÃO INSTALADA DO ANOTA AI")
-    print("-" * 64)
     print(installed_version())
