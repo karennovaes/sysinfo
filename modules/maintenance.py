@@ -10,6 +10,22 @@ def _creation_flags() -> int:
     return subprocess.CREATE_NO_WINDOW if platform.system() == "Windows" else 0
 
 
+def _startup_info() -> "subprocess.STARTUPINFO | None":
+    """Configura STARTUPINFO para ocultar a janela do console no Windows."""
+    if platform.system() != "Windows":
+        return None
+    startupinfo_type = getattr(subprocess, "STARTUPINFO", None)
+    if startupinfo_type is None:
+        return None
+    try:
+        startupinfo = startupinfo_type()
+        startupinfo.dwFlags |= getattr(subprocess, "STARTF_USESHOWWINDOW", 0)
+        startupinfo.wShowWindow = getattr(subprocess, "SW_HIDE", 0)
+    except (AttributeError, OSError, TypeError):
+        return None
+    return startupinfo
+
+
 def _powershell(command: str, args: list[str] | None = None, timeout: int = 30) -> str:
     try:
         result = subprocess.run(
@@ -19,6 +35,7 @@ def _powershell(command: str, args: list[str] | None = None, timeout: int = 30) 
             timeout=timeout,
             check=False,
             creationflags=_creation_flags(),
+            startupinfo=_startup_info(),
         )
     except (OSError, subprocess.SubprocessError) as exc:
         return f"Erro ao executar PowerShell: {exc}"
@@ -53,6 +70,7 @@ def display_startup_programs() -> None:
             timeout=20,
             check=False,
             creationflags=_creation_flags(),
+            startupinfo=_startup_info(),
         )
     except (OSError, subprocess.SubprocessError) as exc:
         print(f"Não foi possível consultar a inicialização: {exc}")

@@ -72,6 +72,22 @@ def _creation_flags() -> int:
     return creationflags
 
 
+def _startup_info() -> "subprocess.STARTUPINFO | None":
+    """Configura STARTUPINFO para ocultar a janela do console no Windows."""
+    if platform.system() != "Windows":
+        return None
+    startupinfo_type = getattr(subprocess, "STARTUPINFO", None)
+    if startupinfo_type is None:
+        return None
+    try:
+        startupinfo = startupinfo_type()
+        startupinfo.dwFlags |= getattr(subprocess, "STARTF_USESHOWWINDOW", 0)
+        startupinfo.wShowWindow = getattr(subprocess, "SW_HIDE", 0)
+    except (AttributeError, OSError, TypeError):
+        return None
+    return startupinfo
+
+
 def _ensure_admin() -> None:
     """Reinicia o programa com privilégios de administrador no Windows."""
     if platform.system() != "Windows":
@@ -97,6 +113,7 @@ def _run_command_capture(command: list[str]) -> str:
             timeout=30,
             check=False,
             creationflags=_creation_flags(),
+            startupinfo=_startup_info(),
         )
         output = (result.stdout or "") + (result.stderr or "")
         return output.strip() or "Comando executado sem saída."
@@ -124,6 +141,7 @@ def _clear_print_queue() -> str:
                     timeout=15,
                     check=False,
                     creationflags=_creation_flags(),
+                    startupinfo=_startup_info(),
                 )
             else:
                 result = subprocess.run(
@@ -133,6 +151,7 @@ def _clear_print_queue() -> str:
                     timeout=15,
                     check=False,
                     creationflags=_creation_flags(),
+                    startupinfo=_startup_info(),
                 )
             output_lines.append(f"> {' '.join(command)}")
             output_lines.append((result.stdout or result.stderr or "OK").strip())
@@ -796,8 +815,8 @@ class SystemDiagnosticsApp:
             self._result_queue.put(
                 (
                     "output",
-                    f"\n{'=' * 60}\n{title}\n{'=' * 60}\n"
-                    f"{captured.getvalue()}\n{'-' * 60}\n",
+                    f"\n{'=' * 59}\n{title}\n{'=' * 59}\n"
+                    f"{captured.getvalue()}\n{'-' * 59}\n",
                 )
             )
         self._result_queue.put(("done", None))
@@ -1069,7 +1088,7 @@ class SystemDiagnosticsApp:
         if platform.system() != "Windows":
             self._queue_command_output("Disponível apenas no Windows")
             return
-        subprocess.Popen(["explorer", PRINTERS_COMMAND], creationflags=_creation_flags())
+        subprocess.Popen(["explorer", PRINTERS_COMMAND], creationflags=_creation_flags(), startupinfo=_startup_info())
         self._queue_command_output("Abrindo pasta de Impressoras...")
 
     def _clear_printer_queue(self) -> None:
@@ -1102,7 +1121,7 @@ class SystemDiagnosticsApp:
         if platform.system() != "Windows":
             self._queue_command_output("Disponível apenas no Windows")
             return
-        subprocess.Popen(["msconfig"], creationflags=_creation_flags())
+        subprocess.Popen(["msconfig"], creationflags=_creation_flags(), startupinfo=_startup_info())
         self._queue_command_output("Abrindo MSCONFIG...")
 
     def _flush_dns(self) -> None:
@@ -1207,7 +1226,7 @@ class SystemDiagnosticsApp:
         self._queue_command_output(f"Download concluído: {destination}")
         self._queue_command_output(f"SHA-256: {sha256}")
         if platform.system() == "Windows":
-            subprocess.Popen(["explorer", downloads_path], creationflags=_creation_flags())
+            subprocess.Popen(["explorer", downloads_path], creationflags=_creation_flags(), startupinfo=_startup_info())
 
 
 _ICON_B64 = (
