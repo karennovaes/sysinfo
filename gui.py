@@ -796,8 +796,8 @@ class SystemDiagnosticsApp:
             self._result_queue.put(
                 (
                     "output",
-                    f"\n{'=' * 64}\n{title}\n{'=' * 64}\n"
-                    f"{captured.getvalue()}\n{'-' * 64}\n",
+                    f"\n{'=' * 60}\n{title}\n{'=' * 60}\n"
+                    f"{captured.getvalue()}\n{'-' * 60}\n",
                 )
             )
         self._result_queue.put(("done", None))
