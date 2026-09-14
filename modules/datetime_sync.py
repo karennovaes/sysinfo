@@ -9,6 +9,8 @@ from datetime import datetime, timedelta, timezone
 from typing import Any, Callable
 from zoneinfo import ZoneInfo
 
+from modules.security import log_audit
+
 try:
     from tzlocal import get_localzone_name
 except ImportError:  # pragma: no cover - usado quando a dependência ainda não foi instalada
@@ -23,6 +25,30 @@ ENABLE_COMMAND = (
 )
 
 RunCommand = Callable[..., subprocess.CompletedProcess[str]]
+
+
+def _creation_flags() -> int:
+    """Evita janelas de console para comandos auxiliares no Windows."""
+    creationflags = 0
+    if platform.system() == "Windows":
+        creationflags = subprocess.CREATE_NO_WINDOW
+    return creationflags
+
+
+def _startup_info() -> "subprocess.STARTUPINFO | None":
+    """Configura STARTUPINFO para ocultar a janela do console no Windows."""
+    if platform.system() != "Windows":
+        return None
+    startupinfo_type = getattr(subprocess, "STARTUPINFO", None)
+    if startupinfo_type is None:
+        return None
+    try:
+        startupinfo = startupinfo_type()
+        startupinfo.dwFlags |= getattr(subprocess, "STARTF_USESHOWWINDOW", 0)
+        startupinfo.wShowWindow = getattr(subprocess, "SW_HIDE", 0)
+    except (AttributeError, OSError, TypeError):
+        return None
+    return startupinfo
 
 
 def _local_timezone() -> tuple[str, Any]:
@@ -101,6 +127,8 @@ def check_automatic_sync(
             text=True,
             timeout=10,
             check=False,
+            creationflags=_creation_flags(),
+            startupinfo=_startup_info(),
         )
         configuration = run_command(
             ["w32tm", "/query", "/configuration"],
@@ -108,6 +136,8 @@ def check_automatic_sync(
             text=True,
             timeout=10,
             check=False,
+            creationflags=_creation_flags(),
+            startupinfo=_startup_info(),
         )
     except (OSError, subprocess.SubprocessError) as exc:
         return {
@@ -168,6 +198,8 @@ def synchronize_ntp(
             text=True,
             timeout=10,
             check=False,
+            creationflags=_creation_flags(),
+            startupinfo=_startup_info(),
         )
     except (OSError, subprocess.SubprocessError) as exc:
         return {
@@ -188,6 +220,8 @@ def synchronize_ntp(
                 text=True,
                 timeout=30,
                 check=False,
+                creationflags=_creation_flags(),
+                startupinfo=_startup_info(),
             )
         except (OSError, subprocess.SubprocessError):
             start_result = None
@@ -211,6 +245,8 @@ def synchronize_ntp(
             text=True,
             timeout=30,
             check=False,
+            creationflags=_creation_flags(),
+            startupinfo=_startup_info(),
         )
     except (OSError, subprocess.SubprocessError) as exc:
         return {
@@ -247,6 +283,10 @@ def display_datetime_sync() -> None:
     """Exibe um resumo compacto de data/hora e sincronização."""
     info = collect_datetime_info()
     result = synchronize_ntp()
+    if result["success"]:
+        log_audit("ntp_sync", "Sincronização NTP concluída com sucesso")
+    else:
+        log_audit("ntp_sync", f"Falha na sincronização NTP: {result['message']}")
     automatic = check_automatic_sync()
 
     # A coleta inclui segundos para uso interno; o chat precisa somente de

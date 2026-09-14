@@ -19,6 +19,30 @@ RESET = "\033[0m"
 RunCommand = Callable[..., subprocess.CompletedProcess[str]]
 
 
+def _creation_flags() -> int:
+    """Evita janelas de console para comandos auxiliares no Windows."""
+    creationflags = 0
+    if platform.system() == "Windows":
+        creationflags = subprocess.CREATE_NO_WINDOW
+    return creationflags
+
+
+def _startup_info() -> "subprocess.STARTUPINFO | None":
+    """Configura STARTUPINFO para ocultar a janela do console no Windows."""
+    if platform.system() != "Windows":
+        return None
+    startupinfo_type = getattr(subprocess, "STARTUPINFO", None)
+    if startupinfo_type is None:
+        return None
+    try:
+        startupinfo = startupinfo_type()
+        startupinfo.dwFlags |= getattr(subprocess, "STARTF_USESHOWWINDOW", 0)
+        startupinfo.wShowWindow = getattr(subprocess, "SW_HIDE", 0)
+    except (AttributeError, OSError, TypeError):
+        return None
+    return startupinfo
+
+
 def _processor_name() -> str:
     """Retorna o nome do processador usando as informações disponíveis."""
     name = ""
@@ -44,6 +68,8 @@ def _processor_name() -> str:
                     text=True,
                     timeout=10,
                     check=False,
+                    creationflags=_creation_flags(),
+                    startupinfo=_startup_info(),
                 )
             except (OSError, subprocess.SubprocessError):
                 continue
@@ -252,6 +278,8 @@ def _list_physical_disks() -> list[dict[str, Any]]:
                 text=True,
                 timeout=10,
                 check=False,
+                creationflags=_creation_flags(),
+                startupinfo=_startup_info(),
             )
         except (OSError, subprocess.SubprocessError):
             continue
@@ -290,6 +318,8 @@ def _detect_storage_type(run_command: RunCommand = subprocess.run) -> str | None
                 text=True,
                 timeout=10,
                 check=False,
+                creationflags=_creation_flags(),
+                startupinfo=_startup_info(),
             )
         except (OSError, subprocess.SubprocessError):
             continue

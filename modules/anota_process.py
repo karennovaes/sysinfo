@@ -19,6 +19,22 @@ def _creation_flags() -> int:
     return getattr(subprocess, "CREATE_NO_WINDOW", 0) if platform.system() == "Windows" else 0
 
 
+def _startup_info() -> "subprocess.STARTUPINFO | None":
+    """Configura STARTUPINFO para ocultar a janela do console no Windows."""
+    if platform.system() != "Windows":
+        return None
+    startupinfo_type = getattr(subprocess, "STARTUPINFO", None)
+    if startupinfo_type is None:
+        return None
+    try:
+        startupinfo = startupinfo_type()
+        startupinfo.dwFlags |= getattr(subprocess, "STARTF_USESHOWWINDOW", 0)
+        startupinfo.wShowWindow = getattr(subprocess, "SW_HIDE", 0)
+    except (AttributeError, OSError, TypeError):
+        return None
+    return startupinfo
+
+
 _EXECUTABLE_NAMES = (
     "AnotaAIResponde.exe",
     "anotaai.exe",
@@ -82,6 +98,7 @@ def _read_version(executable: Path) -> str:
             timeout=15,
             check=False,
             creationflags=_creation_flags(),
+            startupinfo=_startup_info(),
         )
         if result.returncode == 0 and result.stdout.strip():
             return result.stdout.strip()
@@ -106,6 +123,7 @@ def _read_version(executable: Path) -> str:
             timeout=15,
             check=False,
             creationflags=_creation_flags(),
+            startupinfo=_startup_info(),
         )
     except (OSError, subprocess.SubprocessError):
         pass
@@ -258,6 +276,7 @@ def kill_anota_processes() -> int:
                 timeout=15,
                 check=False,
                 creationflags=_creation_flags(),
+                startupinfo=_startup_info(),
             )
         except (OSError, subprocess.SubprocessError):
             continue
@@ -300,6 +319,7 @@ def _shortcut_targets() -> Iterable[Path]:
             timeout=15,
             check=False,
             creationflags=_creation_flags(),
+            startupinfo=_startup_info(),
         )
     except (OSError, subprocess.SubprocessError):
         return []
@@ -368,6 +388,7 @@ def restart_anota() -> str:
                 timeout=15,
                 check=False,
                 creationflags=_creation_flags(),
+                startupinfo=_startup_info(),
             )
             if result.returncode == 0:
                 killed += 1
@@ -378,7 +399,7 @@ def restart_anota() -> str:
     if executable is None:
         return f"{killed} processo(s) encerrado(s), mas o executável do Anota AI não foi encontrado."
     try:
-        subprocess.Popen([str(executable)], creationflags=_creation_flags())
+        subprocess.Popen([str(executable)], creationflags=_creation_flags(), startupinfo=_startup_info())
     except (OSError, subprocess.SubprocessError) as exc:
         return f"{killed} processo(s) encerrado(s), mas não foi possível iniciar o Anota AI: {exc}"
     return f"Anota AI reiniciado com sucesso ({killed} processo(s) encerrado(s)).\nExecutável: {executable}"

@@ -34,8 +34,8 @@ if sys.stderr is None:
     sys.stderr = io.StringIO()
 
 from modules.compatibility_check import display_compatibility_check
-from modules.cpu_monitor import monitor_cpu
 from modules.datetime_sync import display_datetime_sync
+from modules.resource_monitor import create_resource_monitor
 from modules.speedtest import display_speed_test
 from modules.temp_cleaner import display_temp_cleaner
 from modules.system_info import collect_system_info, display_system_info
@@ -57,6 +57,7 @@ from modules.network_tools import (
     display_flush_dns,
 )
 from modules.theme import *
+from modules.config import *
 
 Action = Callable[[], None]
 Section = tuple[str, Action]
@@ -69,6 +70,22 @@ def _creation_flags() -> int:
     if platform.system() == "Windows":
         creationflags = subprocess.CREATE_NO_WINDOW
     return creationflags
+
+
+def _startup_info() -> "subprocess.STARTUPINFO | None":
+    """Configura STARTUPINFO para ocultar a janela do console no Windows."""
+    if platform.system() != "Windows":
+        return None
+    startupinfo_type = getattr(subprocess, "STARTUPINFO", None)
+    if startupinfo_type is None:
+        return None
+    try:
+        startupinfo = startupinfo_type()
+        startupinfo.dwFlags |= getattr(subprocess, "STARTF_USESHOWWINDOW", 0)
+        startupinfo.wShowWindow = getattr(subprocess, "SW_HIDE", 0)
+    except (AttributeError, OSError, TypeError):
+        return None
+    return startupinfo
 
 
 def _ensure_admin() -> None:
@@ -96,6 +113,7 @@ def _run_command_capture(command: list[str]) -> str:
             timeout=30,
             check=False,
             creationflags=_creation_flags(),
+            startupinfo=_startup_info(),
         )
         output = (result.stdout or "") + (result.stderr or "")
         return output.strip() or "Comando executado sem saída."
@@ -123,6 +141,7 @@ def _clear_print_queue() -> str:
                     timeout=15,
                     check=False,
                     creationflags=_creation_flags(),
+                    startupinfo=_startup_info(),
                 )
             else:
                 result = subprocess.run(
@@ -132,6 +151,7 @@ def _clear_print_queue() -> str:
                     timeout=15,
                     check=False,
                     creationflags=_creation_flags(),
+                    startupinfo=_startup_info(),
                 )
             output_lines.append(f"> {' '.join(command)}")
             output_lines.append((result.stdout or result.stderr or "OK").strip())
@@ -143,19 +163,6 @@ def _clear_print_queue() -> str:
 
 class SystemDiagnosticsApp:
     """Janela principal com menu inicial e quatro telas de comandos."""
-
-    PRINTERS_COMMAND = "shell:::{A8A91A66-3A7D-4424-8D24-04E180695C7A}"
-    DRIVER_URL = (
-        "https://raw.githubusercontent.com/Delutto/instalador_universal/main/"
-        "Output/Instalador_Universal_0.9.4.exe"
-    )
-    DRIVER_FILENAME = "Instalador_Universal_0.9.4.exe"
-    DESKTOP_URL = "https://app.anota.ai/download-app/anotaai-desktop"
-    DESKTOP_FILENAME = "anotaai-desktop.exe"
-    NETSTATGUI_URL = (
-        "https://raw.githubusercontent.com/Delutto/NetStatGUI/main/bin/NetStatGUI.exe"
-    )
-    NETSTATGUI_FILENAME = "NetStatGUI.exe"
 
     def __init__(self, root: tk.Tk) -> None:
         self.root = root
@@ -203,6 +210,7 @@ class SystemDiagnosticsApp:
         self._pending_tool_output = ""
         self._progress_total = 0
         self._progress_current = 0
+        self._resource_monitor = None
 
         self._build_initial_frame()
         self._build_computer_frame()
@@ -317,7 +325,7 @@ class SystemDiagnosticsApp:
             ("Sincronização de Hora", self._sync_time),
             ("Compatibilidade", self._check_compatibility),
             ("Teste de Velocidade", self._speed_test),
-            ("Monitor de CPU", self._monitor_cpu),
+            ("Monitor de Recursos", self._monitor_cpu),
             ("Verificar Antivírus", self._check_antivirus),
             ("Verificar Inicialização", self._check_startup),
             ("Informações do Sistema", self._show_system_info),
@@ -752,7 +760,6 @@ class SystemDiagnosticsApp:
             "SINCRONIZAÇÃO DE HORA": "Sincronizando hora",
             "VERIFICAÇÃO DE COMPATIBILIDADE": "Verificando compatibilidade",
             "TESTE DE VELOCIDADE": "Testando velocidade",
-            "MONITOR DE CPU": "Monitorando CPU",
             "PROCESSOS ATIVOS DO ANOTA AI": "Verificando processos do Anota AI",
             "VERSÃO INSTALADA DO ANOTA AI": "Verificando versão instalada",
             "LOGS DO ANOTA AI": "Lendo logs do Anota AI",
@@ -808,8 +815,8 @@ class SystemDiagnosticsApp:
             self._result_queue.put(
                 (
                     "output",
-                    f"\n{'=' * 64}\n{title}\n{'=' * 64}\n"
-                    f"{captured.getvalue()}\n{'-' * 64}\n",
+                    f"\n{'=' * 59}\n{title}\n{'=' * 59}\n"
+                    f"{captured.getvalue()}\n{'-' * 59}\n",
                 )
             )
         self._result_queue.put(("done", None))
@@ -870,9 +877,43 @@ class SystemDiagnosticsApp:
         )
 
     def _monitor_cpu(self) -> None:
-        self._start_operation(
-            "Monitor de CPU",
-            [("MONITOR DE CPU", lambda: monitor_cpu(duration=10, interval=1.0))],
+        """Embute o monitor de recursos no painel de resultados da tela Computador."""
+        if self._busy or self._command_busy:
+            return
+
+        screen = "computer"
+        output_frame = self._output_frames.get(screen)
+        scrollbar = self._output_scrollbars.get(screen)
+        progress_frame = self._progress_frames.get(screen)
+        if output_frame is None:
+            return
+
+        # Esconde o terminal e a barra de progresso. O monitor ocupa a mesma
+        # célula do terminal na tela Computador (row=1 porque há progresso).
+        output_frame.grid_remove()
+        if scrollbar:
+            scrollbar.grid_remove()
+        if progress_frame:
+            progress_frame.grid_remove()
+
+        results_content = output_frame.master
+        monitor_frame = tk.Frame(results_content, bg=BG_WHITE)
+        monitor_frame.grid(row=1, column=0, sticky="nsew", padx=0, pady=0)
+        results_content.grid_rowconfigure(1, weight=1)
+        results_content.grid_columnconfigure(0, weight=1)
+
+        self._set_tool_busy(screen, "Monitor de Recursos")
+
+        def _on_monitor_close() -> None:
+            monitor_frame.destroy()
+            output_frame.grid(row=1, column=0, sticky="nsew")
+            if scrollbar:
+                scrollbar.grid(row=1, column=1, sticky="ns")
+            self._resource_monitor = None
+            self._set_tool_ready()
+
+        self._resource_monitor = create_resource_monitor(
+            monitor_frame, on_close=_on_monitor_close
         )
 
     def _show_system_info(self) -> None:
@@ -923,7 +964,6 @@ class SystemDiagnosticsApp:
                 ("SINCRONIZAÇÃO DE HORA", display_datetime_sync),
                 ("VERIFICAÇÃO DE COMPATIBILIDADE", display_compatibility_check),
                 ("TESTE DE VELOCIDADE", display_speed_test),
-                ("MONITOR DE CPU", lambda: monitor_cpu(duration=10, interval=1.0)),
                 ("STATUS DO ANTIVÍRUS", display_antivirus_status),
                 ("PROGRAMAS NA INICIALIZAÇÃO", display_startup_programs),
                 ("INFORMAÇÕES DO SISTEMA", display_system_info),
@@ -1081,7 +1121,7 @@ class SystemDiagnosticsApp:
         if platform.system() != "Windows":
             self._queue_command_output("Disponível apenas no Windows")
             return
-        subprocess.Popen(["explorer", self.PRINTERS_COMMAND], creationflags=_creation_flags())
+        subprocess.Popen(["explorer", PRINTERS_COMMAND], creationflags=_creation_flags(), startupinfo=_startup_info())
         self._queue_command_output("Abrindo pasta de Impressoras...")
 
     def _clear_printer_queue(self) -> None:
@@ -1114,7 +1154,7 @@ class SystemDiagnosticsApp:
         if platform.system() != "Windows":
             self._queue_command_output("Disponível apenas no Windows")
             return
-        subprocess.Popen(["msconfig"], creationflags=_creation_flags())
+        subprocess.Popen(["msconfig"], creationflags=_creation_flags(), startupinfo=_startup_info())
         self._queue_command_output("Abrindo MSCONFIG...")
 
     def _flush_dns(self) -> None:
@@ -1152,21 +1192,21 @@ class SystemDiagnosticsApp:
     def _download_driver(self) -> None:
         self._start_command_thread(
             "printer", "Baixar Instalador de Drivers", lambda: self._download_file(
-                self.DRIVER_URL, self.DRIVER_FILENAME, "Baixando Instalador de Drivers..."
+                DRIVER_URL, DRIVER_FILENAME, "Baixando Instalador de Drivers..."
             )
         )
 
     def _download_desktop(self) -> None:
         self._start_command_thread(
             "program", "Baixar Anota AI Desktop", lambda: self._download_file(
-                self.DESKTOP_URL, self.DESKTOP_FILENAME, "Baixando Anota AI Desktop..."
+                DESKTOP_URL, DESKTOP_FILENAME, "Baixando Anota AI Desktop..."
             )
         )
 
     def _download_netstatgui(self) -> None:
         self._start_command_thread(
             "printer", "Baixar NetStatGUI", lambda: self._download_file(
-                self.NETSTATGUI_URL, self.NETSTATGUI_FILENAME, "Baixando NetStatGUI..."
+                NETSTATGUI_URL, NETSTATGUI_FILENAME, "Baixando NetStatGUI..."
             )
         )
 
@@ -1219,7 +1259,7 @@ class SystemDiagnosticsApp:
         self._queue_command_output(f"Download concluído: {destination}")
         self._queue_command_output(f"SHA-256: {sha256}")
         if platform.system() == "Windows":
-            subprocess.Popen(["explorer", downloads_path], creationflags=_creation_flags())
+            subprocess.Popen(["explorer", downloads_path], creationflags=_creation_flags(), startupinfo=_startup_info())
 
 
 _ICON_B64 = (
