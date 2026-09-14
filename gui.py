@@ -49,7 +49,6 @@ from modules.anota_process import (
 from modules.uninstaller import display_uninstall
 from modules.maintenance import (
     display_antivirus_status,
-    display_repair_shortcut,
     display_startup_programs,
 )
 from modules.network_tools import (
@@ -329,7 +328,6 @@ class SystemDiagnosticsApp:
             ("Verificar Processos Ativos", self._check_anota_processes),
             ("Reiniciar Anota AI", self._restart_anota),
             ("Ler Logs do Anota AI", self._read_anota_logs),
-            ("Reparar Atalhos", self._repair_shortcuts),
             ("Desinstalar Anota AI", self._uninstall_anota),
             ("Baixar Anota AI Desktop", self._download_desktop),
         ]
@@ -359,7 +357,7 @@ class SystemDiagnosticsApp:
             anchor="w",
         ).pack(side="left", fill="x", expand=True)
         run_all_button = self._make_button(
-            title_row, "▶", self._run_all
+            title_row, "▶ Executar Tudo", self._run_all
         )
         run_all_button.pack(side="right")
         self._run_all_status = tk.Label(
@@ -863,9 +861,6 @@ class SystemDiagnosticsApp:
 
     def _check_antivirus(self) -> None:
         self._start_operation("Verificar Antivírus", [("STATUS DO ANTIVÍRUS", display_antivirus_status)])
-
-    def _repair_shortcuts(self) -> None:
-        self._start_operation("Reparar Atalhos", [("REPARAR ATALHO", display_repair_shortcut)], "program")
 
     def _uninstall_anota(self) -> None:
         """Confirma a desinstalação na thread principal antes do trabalho pesado."""
