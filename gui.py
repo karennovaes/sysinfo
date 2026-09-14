@@ -35,7 +35,7 @@ if sys.stderr is None:
 
 from modules.compatibility_check import display_compatibility_check
 from modules.datetime_sync import display_datetime_sync
-from modules.resource_monitor import show_resource_monitor
+from modules.resource_monitor import create_resource_monitor
 from modules.speedtest import display_speed_test
 from modules.temp_cleaner import display_temp_cleaner
 from modules.system_info import collect_system_info, display_system_info
@@ -210,6 +210,7 @@ class SystemDiagnosticsApp:
         self._pending_tool_output = ""
         self._progress_total = 0
         self._progress_current = 0
+        self._resource_monitor = None
 
         self._build_initial_frame()
         self._build_computer_frame()
@@ -814,7 +815,7 @@ class SystemDiagnosticsApp:
             self._result_queue.put(
                 (
                     "output",
-                    f"\n{'=' *59}\n{title}\n{'=' * 59}\n"
+                    f"\n{'=' * 59}\n{title}\n{'=' * 59}\n"
                     f"{captured.getvalue()}\n{'-' * 59}\n",
                 )
             )
@@ -876,7 +877,44 @@ class SystemDiagnosticsApp:
         )
 
     def _monitor_cpu(self) -> None:
-        show_resource_monitor(self.root)
+        """Embute o monitor de recursos no painel de resultados da tela Computador."""
+        if self._busy or self._command_busy:
+            return
+
+        screen = "computer"
+        output_frame = self._output_frames.get(screen)
+        scrollbar = self._output_scrollbars.get(screen)
+        progress_frame = self._progress_frames.get(screen)
+        if output_frame is None:
+            return
+
+        # Esconde o terminal e a barra de progresso. O monitor ocupa a mesma
+        # célula do terminal na tela Computador (row=1 porque há progresso).
+        output_frame.grid_remove()
+        if scrollbar:
+            scrollbar.grid_remove()
+        if progress_frame:
+            progress_frame.grid_remove()
+
+        results_content = output_frame.master
+        monitor_frame = tk.Frame(results_content, bg=BG_WHITE)
+        monitor_frame.grid(row=1, column=0, sticky="nsew", padx=0, pady=0)
+        results_content.grid_rowconfigure(1, weight=1)
+        results_content.grid_columnconfigure(0, weight=1)
+
+        self._set_tool_busy(screen, "Monitor de Recursos")
+
+        def _on_monitor_close() -> None:
+            monitor_frame.destroy()
+            output_frame.grid(row=1, column=0, sticky="nsew")
+            if scrollbar:
+                scrollbar.grid(row=1, column=1, sticky="ns")
+            self._resource_monitor = None
+            self._set_tool_ready()
+
+        self._resource_monitor = create_resource_monitor(
+            monitor_frame, on_close=_on_monitor_close
+        )
 
     def _show_system_info(self) -> None:
         self._start_operation(

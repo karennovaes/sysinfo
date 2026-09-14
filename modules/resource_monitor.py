@@ -2,10 +2,10 @@
 
 from __future__ import annotations
 
-import platform
 import tkinter as tk
 from collections import deque
 from tkinter import ttk
+from typing import Callable
 
 import psutil
 
@@ -20,36 +20,19 @@ from modules.theme import (
 )
 
 
-def show_resource_monitor(parent: tk.Tk) -> None:
-    """Abre a janela do monitor de recursos."""
-    if platform.system() not in {"Windows", "Linux"}:
-        return
-    monitor = ResourceMonitorWindow(parent)
-    parent.wait_window(monitor.window)
-
-
-class ResourceMonitorWindow:
-    """Janela popup com gráficos de CPU, Memória e Disco em tempo real."""
+class ResourceMonitorWidget:
+    """Widget embutido com gráficos de CPU, memória e disco em tempo real."""
 
     MAX_POINTS = 60
     UPDATE_INTERVAL = 1000
     GRAPH_HEIGHT = 80
     GRAPH_WIDTH = 300
 
-    def __init__(self, parent: tk.Tk) -> None:
-        self.window = tk.Toplevel(parent)
-        self.window.title("Monitor de Recursos")
-        self.window.configure(bg=BG_WHITE)
-        self.window.resizable(False, False)
-        self.window.grab_set()
-        self.window.protocol("WM_DELETE_WINDOW", self._close)
-
-        # Centraliza a janela em relação à tela principal.
-        self.window.update_idletasks()
-        x = parent.winfo_x() + (parent.winfo_width() - 420) // 2
-        y = parent.winfo_y() + (parent.winfo_height() - 500) // 2
-        self.window.geometry(f"420x500+{max(x, 0)}+{max(y, 0)}")
-
+    def __init__(
+        self, container: tk.Frame, on_close: Callable[[], None] | None = None
+    ) -> None:
+        self.container = container
+        self._on_close = on_close
         self._cpu_data: deque[float] = deque(
             [0.0] * self.MAX_POINTS, maxlen=self.MAX_POINTS
         )
@@ -67,22 +50,22 @@ class ResourceMonitorWindow:
         self._update()
 
     def _build_ui(self) -> None:
-        """Constrói os cartões de CPU, memória e disco."""
+        """Constrói os cartões de CPU, memória e disco no container."""
         self._build_graph_card("CPU", PRIMARY_COLOR, 0)
         self._build_graph_card("Memória", ACCENT_GREEN, 1)
         self._build_graph_card("Disco", TEXT_DARK, 2)
 
-        close_btn = ttk.Button(
-            self.window,
-            text="Fechar",
+        stop_btn = ttk.Button(
+            self.container,
+            text="Parar",
             command=self._close,
             style="Rounded.TButton",
         )
-        close_btn.pack(pady=(10, 15))
+        stop_btn.pack(pady=(10, 15))
 
     def _build_graph_card(self, label: str, color: str, index: int) -> None:
         """Cria um cartão com valor percentual e gráfico de linha."""
-        frame = tk.Frame(self.window, bg=BG_WHITE, padx=15, pady=5)
+        frame = tk.Frame(self.container, bg=BG_WHITE, padx=15, pady=5)
         frame.pack(fill="x", padx=10, pady=(10 if index == 0 else 5))
 
         header = tk.Frame(frame, bg=BG_WHITE)
@@ -168,7 +151,7 @@ class ResourceMonitorWindow:
         self._disk_detail.configure(text="Atividade de leitura e escrita")
         self._draw_graph(self._disk_canvas, self._disk_data, self._disk_color)
 
-        self._after_id = self.window.after(self.UPDATE_INTERVAL, self._update)
+        self._after_id = self.container.after(self.UPDATE_INTERVAL, self._update)
 
     def _read_disk_activity(self) -> float:
         """Converte a atividade de disco entre leituras em uma escala percentual."""
@@ -219,13 +202,22 @@ class ResourceMonitorWindow:
             canvas.create_line(*points, fill=color, width=2)
 
     def _close(self) -> None:
-        """Interrompe as atualizações e fecha a janela."""
+        """Interrompe as atualizações e chama o callback de encerramento."""
+        if not self._running:
+            return
         self._running = False
         if self._after_id is not None:
-            self.window.after_cancel(self._after_id)
+            self.container.after_cancel(self._after_id)
             self._after_id = None
-        try:
-            self.window.grab_release()
-        except tk.TclError:
-            pass
-        self.window.destroy()
+
+        if self._on_close is not None:
+            self._on_close()
+        else:
+            self.container.destroy()
+
+
+def create_resource_monitor(
+    container: tk.Frame, on_close: Callable[[], None] | None = None
+) -> ResourceMonitorWidget:
+    """Cria o monitor de recursos dentro do container fornecido."""
+    return ResourceMonitorWidget(container, on_close)
