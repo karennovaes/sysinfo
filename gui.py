@@ -327,7 +327,7 @@ class SystemDiagnosticsApp:
         definitions = [
             ("Verificar Processos Ativos", self._check_anota_processes),
             ("Reiniciar Anota AI", self._restart_anota),
-            ("Ler Logs do Anota AI", self._read_anota_logs),
+            ("Ler Logs", self._read_anota_logs),
             ("Desinstalar Anota AI", self._uninstall_anota),
             ("Baixar Anota AI Desktop", self._download_desktop),
         ]
@@ -857,7 +857,7 @@ class SystemDiagnosticsApp:
         self._start_operation("Reiniciar Anota AI", [("REINICIAR ANOTA AI", display_restart_anota)], "program")
 
     def _read_anota_logs(self) -> None:
-        self._start_operation("Ler Logs do Anota AI", [("LOGS DO ANOTA AI", display_anota_logs)], "program")
+        self._start_operation("Ler Logs", [("LOGS DO ANOTA AI", display_anota_logs)], "program")
 
     def _check_antivirus(self) -> None:
         self._start_operation("Verificar Antivírus", [("STATUS DO ANTIVÍRUS", display_antivirus_status)])
