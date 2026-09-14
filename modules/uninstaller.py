@@ -181,9 +181,16 @@ def _shortcut_paths() -> list[Path]:
             [
                 desktop / "Anota AI.lnk" if desktop else None,
                 desktop / "Anota AI Desktop.lnk" if desktop else None,
+                desktop / "AnotaAIResponde.lnk" if desktop else None,
+                desktop / "AnotaAIResponde Desktop.lnk" if desktop else None,
             ]
         )
     )
+    if desktop and desktop.is_dir():
+        try:
+            paths.extend(item for item in desktop.glob("AnotaAIResponde*") if item.exists())
+        except OSError:
+            pass
     for root in (
         _path_from_env("APPDATA", "Microsoft", "Windows", "Start Menu", "Programs"),
         _path_from_env("PROGRAMDATA", "Microsoft", "Windows", "Start Menu", "Programs"),
