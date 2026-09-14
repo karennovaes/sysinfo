@@ -115,6 +115,11 @@ def _installation_paths(scanner_path: str) -> list[Path]:
     """Retorna instalações fixas e, quando seguro, a pasta do scanner."""
     paths: list[Path | None] = [
         _installation_folder(scanner_path),
+        Path(r"C:\Program Files (x86)\AnotaAIResponde"),
+        Path(r"C:\Program Files\AnotaAIResponde"),
+        _path_from_env("PROGRAMFILES(X86)", "AnotaAIResponde"),
+        _path_from_env("PROGRAMFILES", "AnotaAIResponde"),
+        _path_from_env("LOCALAPPDATA", "AnotaAIResponde"),
         Path(r"C:\Program Files (x86)\anotaai"),
         Path(r"C:\Program Files\anotaai"),
         _path_from_env("PROGRAMFILES(X86)", "anotaai"),
@@ -129,8 +134,10 @@ def _application_data_paths() -> list[Path]:
     return _unique_paths(
         [
             _path_from_env("APPDATA", "anotaairesponde"),
+            _path_from_env("APPDATA", "AnotaAIResponde"),
             _path_from_env("APPDATA", "anota ai"),
             _path_from_env("LOCALAPPDATA", "anotaairesponde"),
+            _path_from_env("LOCALAPPDATA", "AnotaAIResponde"),
         ]
     )
 
@@ -140,8 +147,10 @@ def _registry_keys() -> tuple[str, ...]:
         r"HKCU\Software\anotaai",
         r"HKCU\Software\anota ai",
         r"HKCU\Software\anotaairesponde",
+        r"HKCU\Software\AnotaAIResponde",
         r"HKLM\Software\anotaai",
         r"HKLM\Software\anota ai",
+        r"HKLM\Software\AnotaAIResponde",
     )
 
 
@@ -183,6 +192,7 @@ def _shortcut_paths() -> list[Path]:
             continue
         try:
             paths.extend(item for item in root.glob("Anota AI*") if item.exists())
+            paths.extend(item for item in root.glob("AnotaAIResponde*") if item.exists())
         except OSError:
             continue
     return _unique_paths(paths)

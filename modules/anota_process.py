@@ -20,6 +20,7 @@ def _creation_flags() -> int:
 
 
 _EXECUTABLE_NAMES = (
+    "AnotaAIResponde.exe",
     "anotaai.exe",
     "anota-ai.exe",
     "anotaai-desktop.exe",
@@ -31,7 +32,7 @@ def _normalise_name(value: str) -> str:
     return value.casefold().replace(" ", "").replace("-", "")
 
 
-_ANOTA_NAME_MARKERS = ("anota", "anotaai", "anota ai", "anotaresponde")
+_ANOTA_NAME_MARKERS = ("anotaairesponde", "anota", "anotaai", "anota ai", "anotaresponde")
 
 
 def _contains_anota_name(value: str) -> bool:
@@ -319,6 +320,8 @@ def find_anota_executable() -> Path | None:
         for path in (
             r"C:\Program Files\Anota AI",
             r"C:\Program Files (x86)\Anota AI",
+            r"C:\Program Files\AnotaAIResponde",
+            r"C:\Program Files (x86)\AnotaAIResponde",
             r"C:\Users\Public\Desktop",
         )
     )
@@ -330,6 +333,9 @@ def find_anota_executable() -> Path | None:
             if direct.is_file():
                 return direct
             nested = root / "anotaai" / name
+            if nested.is_file():
+                return nested
+            nested = root / "AnotaAIResponde" / name
             if nested.is_file():
                 return nested
 
