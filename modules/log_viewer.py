@@ -131,7 +131,7 @@ class LogViewerWidget:
         self._tree.tag_configure("info", foreground=COLOR_INFO, background="#FFFDF5")
         self._tree.tag_configure("other", foreground=COLOR_OTHER, background=BG_WHITE)
 
-        tree_scroll = tk.Scrollbar(
+        tree_scroll_y = tk.Scrollbar(
             self.container,
             orient="vertical",
             command=self._tree.yview,
@@ -139,12 +139,24 @@ class LogViewerWidget:
             relief="flat",
             borderwidth=0,
         )
-        self._tree.configure(yscrollcommand=tree_scroll.set)
+        tree_scroll_x = tk.Scrollbar(
+            self.container,
+            orient="horizontal",
+            command=self._tree.xview,
+            troughcolor=BG_LIGHT,
+            relief="flat",
+            borderwidth=0,
+        )
+        self._tree.configure(
+            yscrollcommand=tree_scroll_y.set,
+            xscrollcommand=tree_scroll_x.set,
+        )
 
         self._tree.pack(
-            side="left", fill="both", expand=True, padx=(10, 0), pady=(0, 10)
+            side="top", fill="both", expand=True, padx=(10, 0), pady=(0, 0)
         )
-        tree_scroll.pack(side="right", fill="y", padx=(0, 10), pady=(0, 10))
+        tree_scroll_y.pack(side="right", fill="y", padx=(0, 10), pady=(0, 0))
+        tree_scroll_x.pack(side="bottom", fill="x", padx=(10, 10), pady=(0, 10))
 
         self._empty_label = tk.Label(
             self.container,
