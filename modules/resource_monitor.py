@@ -51,21 +51,64 @@ class ResourceMonitorWidget:
 
     def _build_ui(self) -> None:
         """Constrói os cartões de CPU, memória e disco no container."""
-        self._build_graph_card("CPU", PRIMARY_COLOR, 0)
-        self._build_graph_card("Memória", ACCENT_GREEN, 1)
-        self._build_graph_card("Disco", TEXT_DARK, 2)
+        # Botão Parar no topo.
+        button_bar = tk.Frame(self.container, bg=BG_WHITE)
+        button_bar.pack(fill="x", padx=10, pady=(10, 5))
 
-        stop_btn = ttk.Button(
-            self.container,
+        stop_top_btn = ttk.Button(
+            button_bar,
             text="Parar",
             command=self._close,
             style="Rounded.TButton",
         )
-        stop_btn.pack(pady=(10, 15))
+        stop_top_btn.pack(side="left")
+
+        # Canvas com scrollbar para comportar os três gráficos e o botão.
+        canvas = tk.Canvas(
+            self.container,
+            bg=BG_WHITE,
+            highlightthickness=0,
+            bd=0,
+        )
+        scrollbar = tk.Scrollbar(
+            self.container,
+            orient="vertical",
+            command=canvas.yview,
+            troughcolor=BG_LIGHT,
+            activebackground=PRIMARY_COLOR,
+            relief="flat",
+            borderwidth=0,
+        )
+        scrollbar.pack(side="right", fill="y")
+        canvas.pack(side="left", fill="both", expand=True)
+        canvas.configure(yscrollcommand=scrollbar.set)
+
+        # Frame interno onde os cartões e o botão são empacotados.
+        inner = tk.Frame(canvas, bg=BG_WHITE)
+        inner_window = canvas.create_window((0, 0), window=inner, anchor="nw")
+
+        # Atualiza a região de rolagem quando o conteúdo muda.
+        def _configure_scroll_region(event: tk.Event) -> None:
+            canvas.configure(scrollregion=canvas.bbox("all"))
+
+        def _configure_inner_width(event: tk.Event) -> None:
+            # Faz o frame interno acompanhar a largura do canvas.
+            canvas.itemconfig(inner_window, width=event.width)
+
+        inner.bind("<Configure>", _configure_scroll_region)
+        canvas.bind("<Configure>", _configure_inner_width)
+
+        self._scrollable_container = inner
+
+        self._build_graph_card("CPU", PRIMARY_COLOR, 0)
+        self._build_graph_card("Memória", ACCENT_GREEN, 1)
+        self._build_graph_card("Disco", TEXT_DARK, 2)
+
+
 
     def _build_graph_card(self, label: str, color: str, index: int) -> None:
         """Cria um cartão com valor percentual e gráfico de linha."""
-        frame = tk.Frame(self.container, bg=BG_WHITE, padx=15, pady=5)
+        frame = tk.Frame(self._scrollable_container, bg=BG_WHITE, padx=15, pady=5)
         frame.pack(fill="x", padx=10, pady=(10 if index == 0 else 5))
 
         header = tk.Frame(frame, bg=BG_WHITE)
@@ -203,8 +246,6 @@ class ResourceMonitorWidget:
 
     def _close(self) -> None:
         """Interrompe as atualizações e chama o callback de encerramento."""
-        if not self._running:
-            return
         self._running = False
         if self._after_id is not None:
             self.container.after_cancel(self._after_id)
