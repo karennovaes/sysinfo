@@ -39,7 +39,6 @@ from modules.resource_monitor import create_resource_monitor
 from modules.speedtest import display_speed_test
 from modules.temp_cleaner import display_temp_cleaner
 from modules.security import calculate_sha256, log_audit, validate_url
-from modules.log_viewer import create_log_viewer
 from modules.anota_process import (
     display_anota_processes,
     display_restart_anota,
@@ -48,7 +47,6 @@ from modules.anota_process import (
 from modules.uninstaller import display_uninstall
 from modules.maintenance import (
     display_antivirus_status,
-    display_startup_programs,
 )
 from modules.network_tools import (
     display_anota_connection,
@@ -210,7 +208,6 @@ class SystemDiagnosticsApp:
         self._progress_total = 0
         self._progress_current = 0
         self._resource_monitor = None
-        self._log_viewer = None
 
         self._build_initial_frame()
         self._build_computer_frame()
@@ -327,7 +324,6 @@ class SystemDiagnosticsApp:
             ("Teste de Velocidade", self._speed_test),
             ("Monitor de Recursos", self._monitor_cpu),
             ("Verificar Antivírus", self._check_antivirus),
-            ("Verificar Inicialização", self._check_startup),
         ]
         results_frame = self._build_action_screen(
             body, "computer", definitions, with_progress=True
@@ -338,7 +334,6 @@ class SystemDiagnosticsApp:
         definitions = [
             ("Verificar Processos Ativos", self._check_anota_processes),
             ("Reiniciar Anota AI", self._restart_anota),
-            ("Ler Logs", self._read_anota_logs),
             ("Desinstalar Anota AI", self._uninstall_anota),
             ("Baixar Anota AI Desktop", self._download_desktop),
         ]
@@ -723,9 +718,7 @@ class SystemDiagnosticsApp:
             "TESTE DE VELOCIDADE": "Testando velocidade",
             "PROCESSOS ATIVOS DO ANOTA AI": "Verificando processos do Anota AI",
             "VERSÃO INSTALADA DO ANOTA AI": "Verificando versão instalada",
-            "LOGS DO ANOTA AI": "Lendo logs do Anota AI",
             "STATUS DO ANTIVÍRUS": "Verificando antivírus",
-            "PROGRAMAS NA INICIALIZAÇÃO": "Verificando inicialização",
         }
         return names.get(section_title, section_title)
 
@@ -885,42 +878,6 @@ class SystemDiagnosticsApp:
     def _restart_anota(self) -> None:
         self._start_operation("Reiniciar Anota AI", [("REINICIAR ANOTA AI", display_restart_anota)], "program")
 
-    def _read_anota_logs(self) -> None:
-        """Embute o visualizador de logs no painel de resultados da tela Programa."""
-        if self._busy or self._command_busy:
-            return
-
-        screen = "program"
-        output_frame = self._output_frames.get(screen)
-        scrollbar = self._output_scrollbars.get(screen)
-        progress_frame = self._progress_frames.get(screen)
-        if output_frame is None:
-            return
-
-        output_frame.grid_remove()
-        if scrollbar:
-            scrollbar.grid_remove()
-        if progress_frame:
-            progress_frame.grid_remove()
-
-        results_content = output_frame.master
-        log_frame = tk.Frame(results_content, bg=BG_WHITE)
-        log_frame.grid(row=1, column=0, sticky="nsew", padx=0, pady=0)
-        results_content.grid_rowconfigure(1, weight=1)
-        results_content.grid_columnconfigure(0, weight=1)
-
-        self._set_tool_busy(screen, "Ler Logs")
-
-        def _on_log_close() -> None:
-            log_frame.destroy()
-            output_frame.grid(row=1, column=0, sticky="nsew")
-            if scrollbar:
-                scrollbar.grid(row=1, column=1, sticky="ns")
-            self._log_viewer = None
-            self._set_tool_ready()
-
-        self._log_viewer = create_log_viewer(log_frame, on_close=_on_log_close)
-
     def _check_antivirus(self) -> None:
         self._start_operation("Verificar Antivírus", [("STATUS DO ANTIVÍRUS", display_antivirus_status)])
 
@@ -938,11 +895,6 @@ class SystemDiagnosticsApp:
             "Desinstalar Anota AI",
             [("DESINSTALAÇÃO COMPLETA DO ANOTA AI", display_uninstall)],
             "program",
-        )
-
-    def _check_startup(self) -> None:
-        self._start_operation(
-            "Verificar Inicialização", [("PROGRAMAS NA INICIALIZAÇÃO", display_startup_programs)]
         )
 
     def _scan_anota_installation(self) -> None:
