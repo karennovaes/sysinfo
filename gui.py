@@ -33,11 +33,7 @@ if sys.stdout is None:
 if sys.stderr is None:
     sys.stderr = io.StringIO()
 
-from modules.compatibility_check import display_compatibility_check
 from modules.datetime_sync import display_datetime_sync
-from modules.windows_events import display_windows_events
-from modules.windows_update import display_windows_update
-from modules.whatsapp_status import display_whatsapp_status
 from modules.printer_diagnostics import display_printer_diagnostics
 from modules.resource_monitor import create_resource_monitor
 from modules.speedtest import display_speed_test
@@ -45,13 +41,10 @@ from modules.temp_cleaner import display_temp_cleaner
 from modules.security import calculate_sha256, log_audit, validate_url
 from modules.anota_process import (
     display_anota_processes,
-    display_restart_anota,
     scan_anota_installation,
 )
 from modules.uninstaller import display_uninstall
-from modules.maintenance import (
-    display_antivirus_status,
-)
+from modules.result_cards import Card, create_result_cards
 from modules.network_tools import (
     display_anota_connection,
     display_firewall_status,
@@ -339,7 +332,6 @@ class SystemDiagnosticsApp:
         _, body = self._build_screen_shell(self.program_frame, "Programa — Anota AI")
         definitions = [
             ("Verificar Processos Ativos", self._check_anota_processes),
-            ("Reiniciar Anota AI", self._restart_anota),
             ("Status do WhatsApp", self._check_whatsapp),
             ("Desinstalar Anota AI", self._uninstall_anota),
             ("Baixar Anota AI Desktop", self._download_desktop),
@@ -828,10 +820,32 @@ class SystemDiagnosticsApp:
         )
 
     def _check_compatibility(self) -> None:
-        self._start_operation(
-            "Compatibilidade",
-            [("VERIFICAÇÃO DE COMPATIBILIDADE", display_compatibility_check)],
-        )
+        from modules.compatibility_check import check_compatibility
+
+        results = check_compatibility()
+        cards = []
+        labels = {
+            "processador": "Processador",
+            "memoria": "RAM",
+            "armazenamento": "Armazenamento",
+            "sistema_operacional": "Sistema Operacional",
+        }
+        for key, label in labels.items():
+            item = results.get(key, {})
+            atende = item.get("atende", False)
+            msg = item.get("mensagem", "")
+            detail = msg
+            if key == "memoria":
+                detail = f"{item.get('total_gb', 0):.0f} GB — {msg}"
+            elif key == "armazenamento":
+                detail = f"{item.get('tipo', '?')} {item.get('total_gb', 0):.0f} GB — {msg}"
+            elif key == "processador":
+                detail = f"{item.get('nome', '?')} — {msg}"
+            elif key == "sistema_operacional":
+                arch = "64 bits" if item.get("arquitetura_64_bits") else "32 bits"
+                detail = f"{item.get('sistema', '?')} {item.get('versao', '?')} {arch} — {msg}"
+            cards.append(Card(label, detail, "pass" if atende else "fail"))
+        self._show_cards("computer", "Compatibilidade", cards)
 
     def _speed_test(self) -> None:
         self._start_operation(
@@ -878,34 +892,225 @@ class SystemDiagnosticsApp:
             monitor_frame, on_close=_on_monitor_close
         )
 
+    def _show_cards(
+        self,
+        screen: str,
+        label: str,
+        cards: list,
+        action_label: str | None = None,
+        action_callback=None,
+    ) -> None:
+        if self._busy or self._command_busy:
+            return
+        output_frame = self._output_frames.get(screen)
+        scrollbar = self._output_scrollbars.get(screen)
+        progress_frame = self._progress_frames.get(screen)
+        if output_frame is None:
+            return
+        output_frame.grid_remove()
+        if scrollbar:
+            scrollbar.grid_remove()
+        if progress_frame:
+            progress_frame.grid_remove()
+        results_content = output_frame.master
+        cards_frame = tk.Frame(results_content, bg=BG_WHITE)
+        cards_frame.grid(row=1, column=0, sticky="nsew", padx=0, pady=0)
+        results_content.grid_rowconfigure(1, weight=1)
+        results_content.grid_columnconfigure(0, weight=1)
+        self._set_tool_busy(screen, label)
+
+        def _on_cards_close() -> None:
+            cards_frame.destroy()
+            output_frame.grid(row=1, column=0, sticky="nsew")
+            if scrollbar:
+                scrollbar.grid(row=1, column=1, sticky="ns")
+            self._set_tool_ready()
+
+        create_result_cards(
+            cards_frame,
+            cards,
+            on_close=_on_cards_close,
+            action_label=action_label,
+            action_callback=action_callback,
+        )
+
     def _check_anota_processes(self) -> None:
         self._start_operation(
             "Verificar Processos Ativos", [("PROCESSOS ATIVOS DO ANOTA AI", display_anota_processes)], "program"
         )
 
-    def _restart_anota(self) -> None:
-        self._start_operation("Reiniciar Anota AI", [("REINICIAR ANOTA AI", display_restart_anota)], "program")
-
     def _check_whatsapp(self) -> None:
-        self._start_command_thread(
-            "program", "Status do WhatsApp", lambda: self._queue_command_output_capture(display_whatsapp_status)
-        )
+        from modules.whatsapp_status import get_whatsapp_status
+
+        result = get_whatsapp_status()
+        cards = []
+        if result["connected"]:
+            cards.append(Card("WhatsApp", "Conectado — funcionando normalmente", "pass"))
+        elif result["available"]:
+            cards.append(Card("WhatsApp", "Desconectado — verifique a conexão no Anota AI", "fail"))
+        else:
+            cards.append(Card("WhatsApp", result.get("status", "Não configurado"), "warn"))
+        self._show_cards("program", "Status do WhatsApp", cards)
 
     def _check_antivirus(self) -> None:
-        self._start_operation("Verificar Antivírus", [("STATUS DO ANTIVÍRUS", display_antivirus_status)])
+        from modules.maintenance import get_antivirus_status
+
+        result = get_antivirus_status()
+        cards = []
+        cards.append(
+            Card(
+                "Antivírus",
+                "ATIVO" if result["antivirus"] else "INATIVO ou não identificado",
+                "pass" if result["antivirus"] else "fail",
+            )
+        )
+        cards.append(
+            Card(
+                "Proteção em Tempo Real",
+                "ATIVA" if result["realtime"] else "INATIVA ou não identificada",
+                "pass" if result["realtime"] else "fail",
+            )
+        )
+        if not result["antivirus"] or not result["realtime"]:
+            cards.append(
+                Card(
+                    "Aviso",
+                    "A proteção pode estar desativada ou outro antivírus pode estar interferindo.",
+                    "warn",
+                )
+            )
+        self._show_cards("computer", "Verificar Antivírus", cards)
 
     def _check_windows_events(self) -> None:
-        self._start_operation("Eventos do Windows", [("EVENTOS DO WINDOWS", display_windows_events)])
+        from modules.windows_events import get_windows_events
+
+        events = get_windows_events()
+        if not events:
+            self._show_cards(
+                "computer",
+                "Eventos do Windows",
+                [Card("Eventos", "Disponível apenas no Windows.", "warn")],
+            )
+            return
+        cards = []
+        cards.append(
+            Card(
+                "Erros de Aplicação",
+                str(events.get("app_errors", 0)),
+                "pass" if events.get("app_errors", 0) == 0 else "warn",
+            )
+        )
+        if events.get("anotaai_errors", 0) > 0:
+            cards.append(
+                Card(
+                    "Erros do AnotaAIResponde",
+                    f"{events['anotaai_errors']} erro(s) — verificar",
+                    "fail",
+                )
+            )
+        cards.append(
+            Card(
+                "Erros de Sistema",
+                str(events.get("system_errors", 0)),
+                "pass" if events.get("system_errors", 0) == 0 else "warn",
+            )
+        )
+        if events.get("spooler_crashes", 0) > 0:
+            cards.append(
+                Card(
+                    "Crashes do Spooler",
+                    f"{events['spooler_crashes']} — reiniciar spooler",
+                    "fail",
+                )
+            )
+        if events.get("disk_errors", 0) > 0:
+            cards.append(
+                Card(
+                    "Erros de Disco",
+                    f"{events['disk_errors']} — verificar saúde do disco",
+                    "fail",
+                )
+            )
+        if events.get("power_events", 0) > 0:
+            cards.append(
+                Card(
+                    "Quedas de Energia",
+                    f"{events['power_events']} — máquina reiniciou inesperadamente",
+                    "fail",
+                )
+            )
+        if events.get("network_events", 0) > 0:
+            cards.append(
+                Card(
+                    "Eventos de Rede",
+                    f"{events['network_events']} — problemas de conectividade",
+                    "warn",
+                )
+            )
+        if events.get("ssl_errors", 0) > 0:
+            cards.append(
+                Card(
+                    "Erros de SSL/TLS",
+                    f"{events['ssl_errors']} — certificados ou TLS",
+                    "warn",
+                )
+            )
+        if events.get("chrome_crashes", 0) > 0:
+            cards.append(
+                Card(
+                    "Crashes do Electron/Chrome",
+                    f"{events['chrome_crashes']} — app pode ter fechado sozinho",
+                    "fail",
+                )
+            )
+        if all(value == 0 for value in events.values()):
+            cards.append(
+                Card(
+                    "Status",
+                    "Nenhum evento crítico encontrado. Tudo normal.",
+                    "pass",
+                )
+            )
+        self._show_cards("computer", "Eventos do Windows", cards)
 
     def _check_windows_update(self) -> None:
-        self._start_command_thread("computer", "Windows Update", self._windows_update_worker)
+        from modules.windows_update import get_pending_updates
 
-    def _windows_update_worker(self) -> None:
-        captured = StringIO()
-        with redirect_stdout(captured):
-            display_windows_update()
-        self._queue_command_output(captured.getvalue())
-        self._command_result_queue.put(("show_action", "Abrir Windows Update"))
+        result = get_pending_updates()
+        cards = []
+        if result.get("reboot_required"):
+            cards.append(
+                Card(
+                    "Reinicialização Pendente",
+                    "O computador pode reiniciar automaticamente. Salve seus trabalhos.",
+                    "fail",
+                )
+            )
+        if result.get("pending_count", 0) > 0:
+            update_list = "\n".join(result["updates"][:5])
+            if result["pending_count"] > 5:
+                update_list += f"\n... e mais {result['pending_count'] - 5}"
+            cards.append(
+                Card(
+                    f"Atualizações Pendentes ({result['pending_count']})",
+                    update_list,
+                    "warn",
+                )
+            )
+        if not result.get("reboot_required") and result.get("pending_count", 0) == 0:
+            cards.append(Card("Windows Update", "Nenhuma atualização pendente.", "pass"))
+        action_label = (
+            "Abrir Windows Update"
+            if result.get("pending_count", 0) > 0 or result.get("reboot_required")
+            else None
+        )
+        self._show_cards(
+            "computer",
+            "Windows Update",
+            cards,
+            action_label=action_label,
+            action_callback=self._open_windows_update_page,
+        )
 
     def _open_windows_update_page(self) -> None:
         if platform.system() != "Windows":
@@ -973,34 +1178,6 @@ class SystemDiagnosticsApp:
 
     # ---- Ações de Impressora ------------------------------------
 
-    def _show_action_button(self, label: str) -> None:
-        """Mostra um botão de ação acima do terminal após um diagnóstico."""
-        screen = self._active_screen
-        progress_frame = self._progress_frames.get(screen)
-        if progress_frame is not None:
-            progress_frame.grid_remove()
-        # Reutiliza o frame de progresso para mostrar o botão
-        if progress_frame is not None:
-            for child in progress_frame.winfo_children():
-                child.grid_forget()
-            action_btn = ttk.Button(
-                progress_frame,
-                text=label,
-                command=self._open_windows_update_page,
-                style="Rounded.TButton",
-            )
-            action_btn.grid(row=0, column=0, sticky="w", pady=5)
-            progress_frame.grid()
-
-    def _hide_action_button(self) -> None:
-        """Esconde o botão de ação."""
-        screen = self._active_screen
-        progress_frame = self._progress_frames.get(screen)
-        if progress_frame is not None:
-            for child in progress_frame.winfo_children():
-                child.grid_forget()
-            progress_frame.grid_remove()
-
     def _set_command_busy(self, screen: str, label: str) -> None:
         self._command_busy = True
         self._active_screen = screen
@@ -1010,7 +1187,6 @@ class SystemDiagnosticsApp:
             if self._button_labels[button] == label:
                 button.configure(text="Executando...")
         self._append_output(screen, f"{label}\n")
-        self._hide_action_button()
 
     def _set_command_ready(self) -> None:
         screen = self._active_screen
@@ -1093,8 +1269,6 @@ class SystemDiagnosticsApp:
                     )
             elif message_type == "progress_done":
                 self._hide_progress()
-            elif message_type == "show_action" and payload:
-                self._show_action_button(payload)
             elif message_type == "done":
                 finished = True
         if finished:
