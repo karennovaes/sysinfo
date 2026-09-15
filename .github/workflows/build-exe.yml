@@ -34,15 +34,15 @@ jobs:
       - name: Upload artifact
         uses: actions/upload-artifact@v4
         with:
-          name: DiagnosticoSistema-AnotaAI
-          path: dist/DiagnosticoSistema-AnotaAI.exe
+          name: SuporteTools-AnotaAI
+          path: dist/SuporteTools-AnotaAI.exe
 
       - name: Create Release
         if: github.ref == 'refs/heads/main' || github.ref == 'refs/heads/master'
         uses: softprops/action-gh-release@v2
         with:
-          files: dist/DiagnosticoSistema-AnotaAI.exe
+          files: dist/SuporteTools-AnotaAI.exe
           tag_name: v${{ github.run_number }}
-          name: Build #${{ github.run_number }}
+          name: SuporteTools #${{ github.run_number }}
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
