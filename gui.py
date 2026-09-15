@@ -55,6 +55,7 @@ from modules.network_tools import (
     display_anota_connection,
     display_firewall_status,
     display_flush_dns,
+    display_proxy_vpn_status,
 )
 from modules.theme import *
 from modules.config import *
@@ -443,6 +444,7 @@ class SystemDiagnosticsApp:
         definitions = [
             ("Flush DNS", self._flush_dns),
             ("Verificar Firewall", self._check_firewall),
+            ("Verificar Proxy/VPN", self._check_proxy_vpn),
             ("Testar Conexão Anota AI", self._test_anota_connection),
             ("Ipconfig", self._ipconfig),
             ("ARP -a", self._arp),
@@ -1199,6 +1201,13 @@ class SystemDiagnosticsApp:
     def _check_firewall(self) -> None:
         self._start_command_thread(
             "network", "Verificar Firewall", lambda: self._queue_command_output_capture(display_firewall_status)
+        )
+
+    def _check_proxy_vpn(self) -> None:
+        self._start_command_thread(
+            "network",
+            "Verificar Proxy/VPN",
+            lambda: self._queue_command_output_capture(display_proxy_vpn_status),
         )
 
     def _test_anota_connection(self) -> None:
