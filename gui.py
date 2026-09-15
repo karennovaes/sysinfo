@@ -201,6 +201,7 @@ class SystemDiagnosticsApp:
         self._busy = False
         self._command_busy = False
         self._card_queue: queue.Queue = queue.Queue()
+        self._card_busy = False
         self._active_screen = ""
         self._pending_tool_output = ""
         self._progress_total = 0
@@ -904,18 +905,24 @@ class SystemDiagnosticsApp:
         action_label: str | None = None,
         action_callback=None,
     ) -> None:
-        """Executa a coleta numa thread e mostra os cards via _result_queue."""
+        """Executa a coleta numa thread e mostra os cards via _card_queue."""
         if self._busy or self._command_busy:
             return
         self._set_tool_busy(screen, label)
-        self._pending_tool_output = ""
+        # Limpa a fila de cards
+        try:
+            while True:
+                self._card_queue.get_nowait()
+        except queue.Empty:
+            pass
+        self._card_busy = True
 
         def _worker():
             try:
                 cards = data_func()
-                self._result_queue.put(("cards_data", (cards, action_label, action_callback)))
+                self._card_queue.put(("cards", cards))
             except Exception as exc:
-                self._result_queue.put(("cards_error", str(exc)))
+                self._card_queue.put(("error", str(exc)))
 
         worker = threading.Thread(target=_worker, daemon=True, name="card-data")
         worker.start()
@@ -924,14 +931,15 @@ class SystemDiagnosticsApp:
     def _process_card_result(self, screen: str, action_label: str | None, action_callback) -> None:
         """Processa o resultado da coleta de cards na thread principal."""
         try:
-            msg_type, payload = self._result_queue.get_nowait()
+            msg_type, payload = self._card_queue.get_nowait()
         except queue.Empty:
-            if self._busy:
+            if self._card_busy:
                 self.root.after(50, lambda: self._process_card_result(screen, action_label, action_callback))
             return
 
-        if msg_type == "cards_data":
-            cards, act_label, act_cb = payload
+        self._card_busy = False
+
+        if msg_type == "cards":
             output_frame = self._output_frames.get(screen)
             scrollbar = self._output_scrollbars.get(screen)
             progress_frame = self._progress_frames.get(screen)
@@ -958,12 +966,12 @@ class SystemDiagnosticsApp:
 
             create_result_cards(
                 cards_frame,
-                cards,
+                payload,
                 on_close=_on_cards_close,
-                action_label=act_label,
-                action_callback=act_cb,
+                action_label=action_label,
+                action_callback=action_callback,
             )
-        elif msg_type == "cards_error":
+        elif msg_type == "error":
             self._append_output(screen, f"Erro ao coletar dados: {payload}\n")
             self._set_tool_ready()
 
