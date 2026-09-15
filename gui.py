@@ -900,7 +900,19 @@ class SystemDiagnosticsApp:
         self._start_operation("Eventos do Windows", [("EVENTOS DO WINDOWS", display_windows_events)])
 
     def _check_windows_update(self) -> None:
-        self._start_operation("Windows Update", [("WINDOWS UPDATE", display_windows_update)])
+        self._start_command_thread("computer", "Windows Update", self._windows_update_worker)
+
+    def _windows_update_worker(self) -> None:
+        captured = StringIO()
+        with redirect_stdout(captured):
+            display_windows_update()
+        self._queue_command_output(captured.getvalue())
+        self._command_result_queue.put(("show_action", "Abrir Windows Update"))
+
+    def _open_windows_update_page(self) -> None:
+        if platform.system() != "Windows":
+            return
+        subprocess.Popen(["cmd", "/c", "start", "ms-settings:windowsupdate"], creationflags=_creation_flags(), startupinfo=_startup_info())
 
     def _check_timezone_certs(self) -> None:
         self._start_operation("Fuso e Certificados", [("FUSO E CERTIFICADOS", display_timezone_and_certs)])
@@ -966,6 +978,34 @@ class SystemDiagnosticsApp:
 
     # ---- Ações de Impressora ------------------------------------
 
+    def _show_action_button(self, label: str) -> None:
+        """Mostra um botão de ação acima do terminal após um diagnóstico."""
+        screen = self._active_screen
+        progress_frame = self._progress_frames.get(screen)
+        if progress_frame is not None:
+            progress_frame.grid_remove()
+        # Reutiliza o frame de progresso para mostrar o botão
+        if progress_frame is not None:
+            for child in progress_frame.winfo_children():
+                child.grid_forget()
+            action_btn = ttk.Button(
+                progress_frame,
+                text=label,
+                command=self._open_windows_update_page,
+                style="Rounded.TButton",
+            )
+            action_btn.grid(row=0, column=0, sticky="w", pady=5)
+            progress_frame.grid()
+
+    def _hide_action_button(self) -> None:
+        """Esconde o botão de ação."""
+        screen = self._active_screen
+        progress_frame = self._progress_frames.get(screen)
+        if progress_frame is not None:
+            for child in progress_frame.winfo_children():
+                child.grid_forget()
+            progress_frame.grid_remove()
+
     def _set_command_busy(self, screen: str, label: str) -> None:
         self._command_busy = True
         self._active_screen = screen
@@ -975,6 +1015,7 @@ class SystemDiagnosticsApp:
             if self._button_labels[button] == label:
                 button.configure(text="Executando...")
         self._append_output(screen, f"{label}\n")
+        self._hide_action_button()
 
     def _set_command_ready(self) -> None:
         screen = self._active_screen
@@ -1057,6 +1098,8 @@ class SystemDiagnosticsApp:
                     )
             elif message_type == "progress_done":
                 self._hide_progress()
+            elif message_type == "show_action" and payload:
+                self._show_action_button(payload)
             elif message_type == "done":
                 finished = True
         if finished:
