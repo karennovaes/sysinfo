@@ -35,6 +35,11 @@ if sys.stderr is None:
 
 from modules.compatibility_check import display_compatibility_check
 from modules.datetime_sync import display_datetime_sync
+from modules.datetime_sync import display_timezone_and_certs
+from modules.windows_events import display_windows_events
+from modules.windows_update import display_windows_update
+from modules.whatsapp_status import display_whatsapp_status
+from modules.printer_diagnostics import display_printer_diagnostics
 from modules.resource_monitor import create_resource_monitor
 from modules.speedtest import display_speed_test
 from modules.temp_cleaner import display_temp_cleaner
@@ -324,6 +329,9 @@ class SystemDiagnosticsApp:
             ("Teste de Velocidade", self._speed_test),
             ("Monitor de Recursos", self._monitor_cpu),
             ("Verificar Antivírus", self._check_antivirus),
+            ("Eventos do Windows", self._check_windows_events),
+            ("Windows Update", self._check_windows_update),
+            ("Fuso e Certificados", self._check_timezone_certs),
         ]
         results_frame = self._build_action_screen(
             body, "computer", definitions, with_progress=True
@@ -334,6 +342,7 @@ class SystemDiagnosticsApp:
         definitions = [
             ("Verificar Processos Ativos", self._check_anota_processes),
             ("Reiniciar Anota AI", self._restart_anota),
+            ("Status do WhatsApp", self._check_whatsapp),
             ("Desinstalar Anota AI", self._uninstall_anota),
             ("Baixar Anota AI Desktop", self._download_desktop),
         ]
@@ -386,6 +395,7 @@ class SystemDiagnosticsApp:
         definitions = [
             ("Abrir Impressoras", self._open_printers),
             ("Limpar Fila de Impressão", self._clear_printer_queue),
+            ("Diagnóstico de Impressoras", self._check_printer_diag),
             ("Verificar PID na Porta 5000", self._check_port_5000),
             ("Baixar Instalador de Drivers", self._download_driver),
             ("Baixar NetStatGUI", self._download_netstatgui),
@@ -878,8 +888,22 @@ class SystemDiagnosticsApp:
     def _restart_anota(self) -> None:
         self._start_operation("Reiniciar Anota AI", [("REINICIAR ANOTA AI", display_restart_anota)], "program")
 
+    def _check_whatsapp(self) -> None:
+        self._start_command_thread(
+            "program", "Status do WhatsApp", lambda: self._queue_command_output_capture(display_whatsapp_status)
+        )
+
     def _check_antivirus(self) -> None:
         self._start_operation("Verificar Antivírus", [("STATUS DO ANTIVÍRUS", display_antivirus_status)])
+
+    def _check_windows_events(self) -> None:
+        self._start_operation("Eventos do Windows", [("EVENTOS DO WINDOWS", display_windows_events)])
+
+    def _check_windows_update(self) -> None:
+        self._start_operation("Windows Update", [("WINDOWS UPDATE", display_windows_update)])
+
+    def _check_timezone_certs(self) -> None:
+        self._start_operation("Fuso e Certificados", [("FUSO E CERTIFICADOS", display_timezone_and_certs)])
 
     def _uninstall_anota(self) -> None:
         """Confirma a desinstalação na thread principal antes do trabalho pesado."""
@@ -1054,6 +1078,11 @@ class SystemDiagnosticsApp:
     def _clear_printer_queue(self) -> None:
         self._start_command_thread(
             "printer", "Limpar Fila de Impressão", lambda: self._queue_command_output(_clear_print_queue())
+        )
+
+    def _check_printer_diag(self) -> None:
+        self._start_command_thread(
+            "printer", "Diagnóstico de Impressoras", lambda: self._queue_command_output_capture(display_printer_diagnostics)
         )
 
     def _check_port_5000(self) -> None:

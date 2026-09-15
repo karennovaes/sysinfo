@@ -305,3 +305,80 @@ def display_datetime_sync() -> None:
         "Sincronização automática: "
         + ("ativada" if automatic["enabled"] else "desativada")
     )
+
+
+def check_timezone() -> dict[str, str | bool]:
+    """Verifica se o fuso horário está correto para o Brasil."""
+    if platform.system() != "Windows":
+        return {
+            "correct": False,
+            "timezone": "não disponível",
+            "expected": "E. South America Standard Time",
+        }
+    try:
+        result = subprocess.run(
+            [
+                "powershell",
+                "-NoProfile",
+                "-NonInteractive",
+                "-Command",
+                "(Get-TimeZone).Id",
+            ],
+            capture_output=True,
+            text=True,
+            timeout=10,
+            check=False,
+            creationflags=_creation_flags(),
+            startupinfo=_startup_info(),
+        )
+        current_tz = (result.stdout or "").strip()
+    except (OSError, subprocess.SubprocessError):
+        return {
+            "correct": False,
+            "timezone": "erro ao consultar",
+            "expected": "E. South America Standard Time",
+        }
+    expected = "E. South America Standard Time"
+    return {"correct": current_tz == expected, "timezone": current_tz, "expected": expected}
+
+
+def check_expired_certificates() -> int:
+    """Conta certificados SSL expirados no repositório LocalMachine\\My."""
+    if platform.system() != "Windows":
+        return 0
+    try:
+        result = subprocess.run(
+            [
+                "powershell",
+                "-NoProfile",
+                "-NonInteractive",
+                "-Command",
+                "@(Get-ChildItem -Path Cert:\\LocalMachine\\My "
+                "-ErrorAction SilentlyContinue | "
+                "Where-Object {$_.NotAfter -lt (Get-Date)}).Count",
+            ],
+            capture_output=True,
+            text=True,
+            timeout=15,
+            check=False,
+            creationflags=_creation_flags(),
+            startupinfo=_startup_info(),
+        )
+        return int((result.stdout or "0").strip())
+    except (OSError, subprocess.SubprocessError, ValueError):
+        return 0
+
+
+def display_timezone_and_certs() -> None:
+    """Exibe status do fuso horário e certificados SSL."""
+    tz = check_timezone()
+    if tz["correct"]:
+        print(f"Fuso horário: {tz['timezone']} (correto)")
+    else:
+        print(f"Fuso horário: {tz['timezone']} — AVISO: esperado {tz['expected']}")
+
+    expired = check_expired_certificates()
+    if expired > 0:
+        print(f"Certificados SSL expirados: {expired} — AVISO: renovar certificados")
+    else:
+        print("Certificados SSL: nenhum expirado")
