@@ -305,6 +305,11 @@ def display_datetime_sync() -> None:
         "Sincronização automática: "
         + ("ativada" if automatic["enabled"] else "desativada")
     )
+    expired = check_expired_certificates()
+    if expired > 0:
+        print(f"Certificados SSL: {expired} expirado(s) — AVISO: renovar certificados")
+    else:
+        print("Certificados SSL: nenhum expirado")
 
 
 def check_timezone() -> dict[str, str | bool]:
@@ -369,16 +374,3 @@ def check_expired_certificates() -> int:
         return 0
 
 
-def display_timezone_and_certs() -> None:
-    """Exibe status do fuso horário e certificados SSL."""
-    tz = check_timezone()
-    if tz["correct"]:
-        print(f"Fuso horário: {tz['timezone']} (correto)")
-    else:
-        print(f"Fuso horário: {tz['timezone']} — AVISO: esperado {tz['expected']}")
-
-    expired = check_expired_certificates()
-    if expired > 0:
-        print(f"Certificados SSL expirados: {expired} — AVISO: renovar certificados")
-    else:
-        print("Certificados SSL: nenhum expirado")

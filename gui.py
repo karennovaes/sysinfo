@@ -35,7 +35,6 @@ if sys.stderr is None:
 
 from modules.compatibility_check import display_compatibility_check
 from modules.datetime_sync import display_datetime_sync
-from modules.datetime_sync import display_timezone_and_certs
 from modules.windows_events import display_windows_events
 from modules.windows_update import display_windows_update
 from modules.whatsapp_status import display_whatsapp_status
@@ -331,7 +330,6 @@ class SystemDiagnosticsApp:
             ("Verificar Antivírus", self._check_antivirus),
             ("Eventos do Windows", self._check_windows_events),
             ("Windows Update", self._check_windows_update),
-            ("Fuso e Certificados", self._check_timezone_certs),
         ]
         results_frame = self._build_action_screen(
             body, "computer", definitions, with_progress=True
@@ -913,9 +911,6 @@ class SystemDiagnosticsApp:
         if platform.system() != "Windows":
             return
         subprocess.Popen(["cmd", "/c", "start", "ms-settings:windowsupdate"], creationflags=_creation_flags(), startupinfo=_startup_info())
-
-    def _check_timezone_certs(self) -> None:
-        self._start_operation("Fuso e Certificados", [("FUSO E CERTIFICADOS", display_timezone_and_certs)])
 
     def _uninstall_anota(self) -> None:
         """Confirma a desinstalação na thread principal antes do trabalho pesado."""
