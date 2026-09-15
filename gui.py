@@ -904,54 +904,40 @@ class SystemDiagnosticsApp:
         action_label: str | None = None,
         action_callback=None,
     ) -> None:
-        """Executa a coleta de dados numa thread e mostra os cards quando prontos."""
+        """Executa a coleta numa thread e mostra os cards via _result_queue."""
         if self._busy or self._command_busy:
             return
-        output_frame = self._output_frames.get(screen)
-        scrollbar = self._output_scrollbars.get(screen)
-        progress_frame = self._progress_frames.get(screen)
-        if output_frame is None:
-            return
         self._set_tool_busy(screen, label)
+        self._pending_tool_output = ""
+
         def _worker():
             try:
                 cards = data_func()
-                self._card_queue.put(("cards", cards))
+                self._result_queue.put(("cards_data", (cards, action_label, action_callback)))
             except Exception as exc:
-                self._card_queue.put(("error", str(exc)))
+                self._result_queue.put(("cards_error", str(exc)))
 
         worker = threading.Thread(target=_worker, daemon=True, name="card-data")
         worker.start()
-        self.root.after(
-            100,
-            lambda: self._process_card_queue(
-                screen,
-                label,
-                output_frame,
-                scrollbar,
-                progress_frame,
-                action_label,
-                action_callback,
-            ),
-        )
+        self.root.after(50, lambda: self._process_card_result(screen, action_label, action_callback))
 
-    def _process_card_queue(
-        self,
-        screen: str,
-        label: str,
-        output_frame,
-        scrollbar,
-        progress_frame,
-        action_label: str | None,
-        action_callback,
-    ) -> None:
+    def _process_card_result(self, screen: str, action_label: str | None, action_callback) -> None:
+        """Processa o resultado da coleta de cards na thread principal."""
         try:
-            msg_type, payload = self._card_queue.get_nowait()
+            msg_type, payload = self._result_queue.get_nowait()
         except queue.Empty:
-            msg_type, payload = None, None
+            if self._busy:
+                self.root.after(50, lambda: self._process_card_result(screen, action_label, action_callback))
+            return
 
-        if msg_type == "cards":
-            # Esconde terminal e mostra cards somente na thread principal.
+        if msg_type == "cards_data":
+            cards, act_label, act_cb = payload
+            output_frame = self._output_frames.get(screen)
+            scrollbar = self._output_scrollbars.get(screen)
+            progress_frame = self._progress_frames.get(screen)
+            if output_frame is None:
+                self._set_tool_ready()
+                return
             output_frame.grid_remove()
             if scrollbar:
                 scrollbar.grid_remove()
@@ -972,30 +958,14 @@ class SystemDiagnosticsApp:
 
             create_result_cards(
                 cards_frame,
-                payload,
+                cards,
                 on_close=_on_cards_close,
-                action_label=action_label,
-                action_callback=action_callback,
+                action_label=act_label,
+                action_callback=act_cb,
             )
-        elif msg_type == "error":
-            # Mantém o terminal visível para mostrar o erro da coleta.
+        elif msg_type == "cards_error":
             self._append_output(screen, f"Erro ao coletar dados: {payload}\n")
             self._set_tool_ready()
-        else:
-            # Ainda processando, continua aguardando sem bloquear a interface.
-            if self._command_busy or self._busy:
-                self.root.after(
-                    100,
-                    lambda: self._process_card_queue(
-                        screen,
-                        label,
-                        output_frame,
-                        scrollbar,
-                        progress_frame,
-                        action_label,
-                        action_callback,
-                    ),
-                )
 
     def _check_anota_processes(self) -> None:
         self._start_operation(
