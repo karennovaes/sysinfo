@@ -822,35 +822,8 @@ class SystemDiagnosticsApp:
         )
 
     def _check_compatibility(self) -> None:
-        from modules.compatibility_check import check_compatibility
-
-        def _collect():
-            results = check_compatibility()
-            cards = []
-            labels = {
-                "processador": "Processador",
-                "memoria": "RAM",
-                "armazenamento": "Armazenamento",
-                "sistema_operacional": "Sistema Operacional",
-            }
-            for key, label in labels.items():
-                item = results.get(key, {})
-                atende = item.get("atende", False)
-                msg = item.get("mensagem", "")
-                detail = msg
-                if key == "memoria":
-                    detail = f"{item.get('total_gb', 0):.0f} GB — {msg}"
-                elif key == "armazenamento":
-                    detail = f"{item.get('tipo', '?')} {item.get('total_gb', 0):.0f} GB — {msg}"
-                elif key == "processador":
-                    detail = f"{item.get('nome', '?')} — {msg}"
-                elif key == "sistema_operacional":
-                    arch = "64 bits" if item.get("arquitetura_64_bits") else "32 bits"
-                    detail = f"{item.get('sistema', '?')} {item.get('versao', '?')} {arch} — {msg}"
-                cards.append(Card(label, detail, "pass" if atende else "fail"))
-            return cards
-
-        self._show_cards_async("computer", "Compatibilidade", _collect)
+        from modules.compatibility_check import display_compatibility_check
+        self._start_operation("Compatibilidade", [("VERIFICAÇÃO DE COMPATIBILIDADE", display_compatibility_check)])
 
     def _speed_test(self) -> None:
         self._start_operation(
@@ -981,180 +954,20 @@ class SystemDiagnosticsApp:
         )
 
     def _check_whatsapp(self) -> None:
-        from modules.whatsapp_status import get_whatsapp_status
-
-        def _collect():
-            result = get_whatsapp_status()
-            cards = []
-            if result["connected"]:
-                cards.append(Card("WhatsApp", "Conectado — funcionando normalmente", "pass"))
-            elif result["available"]:
-                cards.append(Card("WhatsApp", "Desconectado — verifique a conexão no Anota AI", "fail"))
-            else:
-                cards.append(Card("WhatsApp", result.get("status", "Não configurado"), "warn"))
-            return cards
-
-        self._show_cards_async("program", "Status do WhatsApp", _collect)
+        from modules.whatsapp_status import display_whatsapp_status
+        self._start_command_thread("program", "Status do WhatsApp", lambda: self._queue_command_output_capture(display_whatsapp_status))
 
     def _check_antivirus(self) -> None:
-        from modules.maintenance import get_antivirus_status
-
-        def _collect():
-            result = get_antivirus_status()
-            cards = []
-            cards.append(
-                Card(
-                    "Antivírus",
-                    "ATIVO" if result["antivirus"] else "INATIVO ou não identificado",
-                    "pass" if result["antivirus"] else "fail",
-                )
-            )
-            cards.append(
-                Card(
-                    "Proteção em Tempo Real",
-                    "ATIVA" if result["realtime"] else "INATIVA ou não identificada",
-                    "pass" if result["realtime"] else "fail",
-                )
-            )
-            if not result["antivirus"] or not result["realtime"]:
-                cards.append(
-                    Card(
-                        "Aviso",
-                        "A proteção pode estar desativada ou outro antivírus pode estar interferindo.",
-                        "warn",
-                    )
-                )
-            return cards
-
-        self._show_cards_async("computer", "Verificar Antivírus", _collect)
+        from modules.maintenance import display_antivirus_status
+        self._start_operation("Verificar Antivírus", [("STATUS DO ANTIVÍRUS", display_antivirus_status)])
 
     def _check_windows_events(self) -> None:
-        from modules.windows_events import get_windows_events
-
-        def _collect():
-            events = get_windows_events()
-            if not events:
-                return [Card("Eventos", "Disponível apenas no Windows.", "warn")]
-            cards = []
-            cards.append(
-                Card(
-                    "Erros de Aplicação",
-                    str(events.get("app_errors", 0)),
-                    "pass" if events.get("app_errors", 0) == 0 else "warn",
-                )
-            )
-            if events.get("anotaai_errors", 0) > 0:
-                cards.append(
-                    Card(
-                        "Erros do AnotaAIResponde",
-                        f"{events['anotaai_errors']} erro(s) — verificar",
-                        "fail",
-                    )
-                )
-            cards.append(
-                Card(
-                    "Erros de Sistema",
-                    str(events.get("system_errors", 0)),
-                    "pass" if events.get("system_errors", 0) == 0 else "warn",
-                )
-            )
-            if events.get("spooler_crashes", 0) > 0:
-                cards.append(
-                    Card(
-                        "Crashes do Spooler",
-                        f"{events['spooler_crashes']} — reiniciar spooler",
-                        "fail",
-                    )
-                )
-            if events.get("disk_errors", 0) > 0:
-                cards.append(
-                    Card(
-                        "Erros de Disco",
-                        f"{events['disk_errors']} — verificar saúde do disco",
-                        "fail",
-                    )
-                )
-            if events.get("power_events", 0) > 0:
-                cards.append(
-                    Card(
-                        "Quedas de Energia",
-                        f"{events['power_events']} — máquina reiniciou inesperadamente",
-                        "fail",
-                    )
-                )
-            if events.get("network_events", 0) > 0:
-                cards.append(
-                    Card(
-                        "Eventos de Rede",
-                        f"{events['network_events']} — problemas de conectividade",
-                        "warn",
-                    )
-                )
-            if events.get("ssl_errors", 0) > 0:
-                cards.append(
-                    Card(
-                        "Erros de SSL/TLS",
-                        f"{events['ssl_errors']} — certificados ou TLS",
-                        "warn",
-                    )
-                )
-            if events.get("chrome_crashes", 0) > 0:
-                cards.append(
-                    Card(
-                        "Crashes do Electron/Chrome",
-                        f"{events['chrome_crashes']} — app pode ter fechado sozinho",
-                        "fail",
-                    )
-                )
-            if all(value == 0 for value in events.values()):
-                cards.append(
-                    Card(
-                        "Status",
-                        "Nenhum evento crítico encontrado. Tudo normal.",
-                        "pass",
-                    )
-                )
-            return cards
-
-        self._show_cards_async("computer", "Eventos do Windows", _collect)
+        from modules.windows_events import display_windows_events
+        self._start_operation("Eventos do Windows", [("EVENTOS DO WINDOWS", display_windows_events)])
 
     def _check_windows_update(self) -> None:
-        from modules.windows_update import get_pending_updates
-
-        def _collect():
-            result = get_pending_updates()
-            cards = []
-            if result.get("reboot_required"):
-                cards.append(
-                    Card(
-                        "Reinicialização Pendente",
-                        "O computador pode reiniciar automaticamente. Salve seus trabalhos.",
-                        "fail",
-                    )
-                )
-            if result.get("pending_count", 0) > 0:
-                update_list = "\n".join(result["updates"][:5])
-                if result["pending_count"] > 5:
-                    update_list += f"\n... e mais {result['pending_count'] - 5}"
-                cards.append(
-                    Card(
-                        f"Atualizações Pendentes ({result['pending_count']})",
-                        update_list,
-                        "warn",
-                    )
-                )
-            if not result.get("reboot_required") and result.get("pending_count", 0) == 0:
-                cards.append(Card("Windows Update", "Nenhuma atualização pendente.", "pass"))
-            return cards
-
-        action_label = "Abrir Windows Update"
-        self._show_cards_async(
-            "computer",
-            "Windows Update",
-            _collect,
-            action_label=action_label,
-            action_callback=self._open_windows_update_page,
-        )
+        from modules.windows_update import display_windows_update
+        self._start_operation("Windows Update", [("WINDOWS UPDATE", display_windows_update)])
 
     def _open_windows_update_page(self) -> None:
         if platform.system() != "Windows":
