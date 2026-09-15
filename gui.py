@@ -38,9 +38,7 @@ from modules.datetime_sync import display_datetime_sync
 from modules.resource_monitor import create_resource_monitor
 from modules.speedtest import display_speed_test
 from modules.temp_cleaner import display_temp_cleaner
-from modules.system_info import collect_system_info, display_system_info
 from modules.security import calculate_sha256, log_audit, validate_url
-from modules.anota_logs import display_anota_logs
 from modules.anota_process import (
     display_anota_processes,
     display_restart_anota,
@@ -49,12 +47,12 @@ from modules.anota_process import (
 from modules.uninstaller import display_uninstall
 from modules.maintenance import (
     display_antivirus_status,
-    display_startup_programs,
 )
 from modules.network_tools import (
     display_anota_connection,
     display_firewall_status,
     display_flush_dns,
+    display_proxy_vpn_status,
 )
 from modules.theme import *
 from modules.config import *
@@ -202,7 +200,6 @@ class SystemDiagnosticsApp:
         self._scan_result_queue: queue.Queue[tuple[bool, str, str]] = queue.Queue()
         self._scan_button: ttk.Button | None = None
         self._scan_status: tk.Label | None = None
-        self._run_all_status: tk.Label | None = None
         self._scan_busy = False
         self._busy = False
         self._command_busy = False
@@ -327,20 +324,16 @@ class SystemDiagnosticsApp:
             ("Teste de Velocidade", self._speed_test),
             ("Monitor de Recursos", self._monitor_cpu),
             ("Verificar Antivírus", self._check_antivirus),
-            ("Verificar Inicialização", self._check_startup),
-            ("Informações do Sistema", self._show_system_info),
         ]
         results_frame = self._build_action_screen(
             body, "computer", definitions, with_progress=True
         )
-        self._build_run_all_card(results_frame)
 
     def _build_program_frame(self) -> None:
         _, body = self._build_screen_shell(self.program_frame, "Programa — Anota AI")
         definitions = [
             ("Verificar Processos Ativos", self._check_anota_processes),
             ("Reiniciar Anota AI", self._restart_anota),
-            ("Ler Logs", self._read_anota_logs),
             ("Desinstalar Anota AI", self._uninstall_anota),
             ("Baixar Anota AI Desktop", self._download_desktop),
         ]
@@ -348,44 +341,6 @@ class SystemDiagnosticsApp:
             body, "program", definitions, with_progress=True
         )
         self._build_scan_card(results_frame)
-
-    def _build_run_all_card(self, body: tk.Frame) -> None:
-        """Cria o cartão destacado para executar o diagnóstico completo."""
-        card = tk.Frame(
-            body,
-            bg=BG_CARD,
-            highlightbackground=BORDER_COLOR,
-            highlightthickness=1,
-        )
-        children = body.winfo_children()
-        card.pack(fill="x", pady=(0, 8), before=children[0])
-        content = tk.Frame(card, bg=BG_CARD, padx=12, pady=10)
-        content.pack(fill="x")
-        title_row = tk.Frame(content, bg=BG_CARD)
-        title_row.pack(fill="x")
-        tk.Label(
-            title_row,
-            text="Executar diagnóstico completo",
-            bg=BG_CARD,
-            fg=TEXT_DARK,
-            font=FONT_CARD,
-            anchor="w",
-        ).pack(side="left", fill="x", expand=True)
-        run_all_button = self._make_button(
-            title_row, "▶ Executar Tudo", self._run_all
-        )
-        run_all_button.pack(side="right")
-        self._run_all_status = tk.Label(
-            content,
-            text="Aguardando execução",
-            bg=BG_CARD,
-            fg=TEXT_DARK,
-            font=FONT_STATUS,
-            anchor="w",
-            justify="left",
-            wraplength=900,
-        )
-        self._run_all_status.pack(fill="x", pady=(8, 0))
 
     def _build_scan_card(self, body: tk.Frame) -> None:
         """Cria o cartão destacado que apresenta o scanner do Anota AI."""
@@ -442,6 +397,7 @@ class SystemDiagnosticsApp:
         definitions = [
             ("Flush DNS", self._flush_dns),
             ("Verificar Firewall", self._check_firewall),
+            ("Verificar Proxy/VPN", self._check_proxy_vpn),
             ("Testar Conexão Anota AI", self._test_anota_connection),
             ("Ipconfig", self._ipconfig),
             ("ARP -a", self._arp),
@@ -762,9 +718,7 @@ class SystemDiagnosticsApp:
             "TESTE DE VELOCIDADE": "Testando velocidade",
             "PROCESSOS ATIVOS DO ANOTA AI": "Verificando processos do Anota AI",
             "VERSÃO INSTALADA DO ANOTA AI": "Verificando versão instalada",
-            "LOGS DO ANOTA AI": "Lendo logs do Anota AI",
             "STATUS DO ANTIVÍRUS": "Verificando antivírus",
-            "PROGRAMAS NA INICIALIZAÇÃO": "Verificando inicialização",
         }
         return names.get(section_title, section_title)
 
@@ -916,11 +870,6 @@ class SystemDiagnosticsApp:
             monitor_frame, on_close=_on_monitor_close
         )
 
-    def _show_system_info(self) -> None:
-        self._start_operation(
-            "Informações do Sistema", [("INFORMAÇÕES DO SISTEMA", display_system_info)]
-        )
-
     def _check_anota_processes(self) -> None:
         self._start_operation(
             "Verificar Processos Ativos", [("PROCESSOS ATIVOS DO ANOTA AI", display_anota_processes)], "program"
@@ -928,9 +877,6 @@ class SystemDiagnosticsApp:
 
     def _restart_anota(self) -> None:
         self._start_operation("Reiniciar Anota AI", [("REINICIAR ANOTA AI", display_restart_anota)], "program")
-
-    def _read_anota_logs(self) -> None:
-        self._start_operation("Ler Logs", [("LOGS DO ANOTA AI", display_anota_logs)], "program")
 
     def _check_antivirus(self) -> None:
         self._start_operation("Verificar Antivírus", [("STATUS DO ANTIVÍRUS", display_antivirus_status)])
@@ -949,25 +895,6 @@ class SystemDiagnosticsApp:
             "Desinstalar Anota AI",
             [("DESINSTALAÇÃO COMPLETA DO ANOTA AI", display_uninstall)],
             "program",
-        )
-
-    def _check_startup(self) -> None:
-        self._start_operation(
-            "Verificar Inicialização", [("PROGRAMAS NA INICIALIZAÇÃO", display_startup_programs)]
-        )
-
-    def _run_all(self) -> None:
-        self._start_operation(
-            "Executar Tudo",
-            [
-                ("LIMPEZA DE CACHE", display_temp_cleaner),
-                ("SINCRONIZAÇÃO DE HORA", display_datetime_sync),
-                ("VERIFICAÇÃO DE COMPATIBILIDADE", display_compatibility_check),
-                ("TESTE DE VELOCIDADE", display_speed_test),
-                ("STATUS DO ANTIVÍRUS", display_antivirus_status),
-                ("PROGRAMAS NA INICIALIZAÇÃO", display_startup_programs),
-                ("INFORMAÇÕES DO SISTEMA", display_system_info),
-            ],
         )
 
     def _scan_anota_installation(self) -> None:
@@ -1165,6 +1092,13 @@ class SystemDiagnosticsApp:
     def _check_firewall(self) -> None:
         self._start_command_thread(
             "network", "Verificar Firewall", lambda: self._queue_command_output_capture(display_firewall_status)
+        )
+
+    def _check_proxy_vpn(self) -> None:
+        self._start_command_thread(
+            "network",
+            "Verificar Proxy/VPN",
+            lambda: self._queue_command_output_capture(display_proxy_vpn_status),
         )
 
     def _test_anota_connection(self) -> None:

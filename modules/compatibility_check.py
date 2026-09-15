@@ -110,18 +110,55 @@ def _check_processor() -> dict[str, Any]:
 
 
 def _check_memory() -> dict[str, Any]:
-    """Verifica a memória RAM instalada, considerando 12 GB como ideal."""
+    """Verifica a memória RAM instalada, considerando 12 GB como ideal.
+
+    O psutil.reporta a memória usável (total menos a reservada pelo hardware),
+    portanto uma máquina com 8 GB físicos pode aparecer como ~7,69 GB. Para
+    evitar falsos negativos, a leitura é complementada com WMI no Windows e o
+    valor final é arredondado para o GB mais próximo antes da comparação.
+    """
     total_gb = psutil.virtual_memory().total / (1024**3)
-    if total_gb >= 12:
+
+    # No Windows, tenta obter a capacidade física total via WMI, que reporta
+    # o valor completo (ex.: 8.0 GB em vez de 7.69 GB).
+    if platform.system() == "Windows":
+        try:
+            result = subprocess.run(
+                ["wmic", "memorychip", "get", "capacity"],
+                capture_output=True,
+                text=True,
+                timeout=10,
+                check=False,
+                creationflags=_creation_flags(),
+                startupinfo=_startup_info(),
+            )
+            if result.returncode == 0 and result.stdout:
+                total_bytes = 0
+                for line in result.stdout.splitlines():
+                    stripped = line.strip()
+                    if stripped and stripped.lower() != "capacity":
+                        try:
+                            total_bytes += int(stripped)
+                        except ValueError:
+                            pass
+                if total_bytes > 0:
+                    total_gb = total_bytes / (1024**3)
+        except (OSError, subprocess.SubprocessError):
+            pass
+
+    # Arredonda para o GB mais próximo para compensar reservas de hardware.
+    rounded_gb = round(total_gb)
+
+    if rounded_gb >= 12:
         message = "Atende (ideal)"
         compatible = True
-    elif total_gb >= 8:
+    elif rounded_gb >= 8:
         message = "Atende (mínimo)"
         compatible = True
     else:
         message = "Não atende — mínimo de 8GB (ideal: 12GB)"
         compatible = False
-    return {"total_gb": total_gb, "atende": compatible, "mensagem": message}
+    return {"total_gb": rounded_gb, "atende": compatible, "mensagem": message}
 
 
 def _parse_storage_type(output: str) -> str | None:

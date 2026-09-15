@@ -83,6 +83,135 @@ def display_firewall_status() -> None:
         print(output or "Sem saída.")
 
 
+
+def display_proxy_vpn_status() -> None:
+    """Verifica proxy, VPN conectada e adaptadores virtuais no Windows."""
+    if platform.system() != "Windows":
+        print("Disponível apenas no Windows.")
+        return
+
+    internet_settings_key = (
+        r"HKCU\Software\Microsoft\Windows\CurrentVersion\Internet Settings"
+    )
+
+    # --- Proxy do Windows -------------------------------------------------
+    print("PROXY DO WINDOWS")
+    proxy_enable_result = _run(["reg", "query", internet_settings_key, "/v", "ProxyEnable"])
+    proxy_enabled = False
+    if proxy_enable_result is not None and proxy_enable_result.returncode == 0:
+        proxy_match = re.search(
+            r"ProxyEnable\s+REG_DWORD\s+0x([0-9a-f]+)",
+            proxy_enable_result.stdout or "",
+            re.IGNORECASE,
+        )
+        proxy_enabled = bool(proxy_match and int(proxy_match.group(1), 16) == 1)
+
+    proxy_server = ""
+    proxy_server_result = _run(
+        ["reg", "query", internet_settings_key, "/v", "ProxyServer"]
+    )
+    if proxy_server_result is not None and proxy_server_result.returncode == 0:
+        server_match = re.search(
+            r"^\s*ProxyServer\s+REG_SZ\s+(.+?)\s*$",
+            proxy_server_result.stdout or "",
+            re.IGNORECASE | re.MULTILINE,
+        )
+        if server_match:
+            proxy_server = server_match.group(1).strip()
+
+    auto_config = ""
+    auto_config_result = _run(
+        ["reg", "query", internet_settings_key, "/v", "AutoConfigURL"]
+    )
+    if auto_config_result is not None and auto_config_result.returncode == 0:
+        auto_match = re.search(
+            r"^\s*AutoConfigURL\s+REG_SZ\s+(.+?)\s*$",
+            auto_config_result.stdout or "",
+            re.IGNORECASE | re.MULTILINE,
+        )
+        if auto_match:
+            auto_config = auto_match.group(1).strip()
+
+    if proxy_enabled:
+        print("  Proxy: ATIVO")
+        if proxy_server:
+            print(f"  Servidor: {proxy_server}")
+        if auto_config:
+            print(f"  Auto-config: {auto_config}")
+        print("  AVISO: O proxy pode interferir na comunicação do Anota AI.")
+    else:
+        print("  Proxy: inativo")
+        if auto_config:
+            print(f"  Auto-config: {auto_config}")
+
+    print()
+
+    # --- VPN conectada ---------------------------------------------------
+    print("VPN")
+    vpn_result = _run(
+        [
+            "powershell",
+            "-NoProfile",
+            "-NonInteractive",
+            "-Command",
+            (
+                "Get-VpnConnection | "
+                "Where-Object {$_.ConnectionStatus -eq 'Connected'} | "
+                "Select-Object Name,ConnectionStatus | Format-List"
+            ),
+        ]
+    )
+    vpn_output = (vpn_result.stdout if vpn_result is not None else "") or ""
+    if vpn_output.strip():
+        print("  VPN ativa detectada:")
+        for line in vpn_output.strip().splitlines():
+            stripped = line.strip()
+            if stripped:
+                print(f"  {stripped}")
+        print("  AVISO: A VPN pode bloquear ou redirecionar o tráfego do Anota AI.")
+    else:
+        print("  Nenhuma VPN conectada.")
+
+    print()
+
+    # --- Adaptadores virtuais suspeitos ----------------------------------
+    print("ADAPTADORES VIRTUAIS")
+    adapter_result = _run(
+        [
+            "powershell",
+            "-NoProfile",
+            "-NonInteractive",
+            "-Command",
+            (
+                "Get-NetAdapter | Where-Object {$_.Status -eq 'Up'} | "
+                "Select-Object Name,InterfaceDescription | Format-List"
+            ),
+        ]
+    )
+    adapter_output = (adapter_result.stdout if adapter_result is not None else "") or ""
+    vpn_keywords = (
+        "vpn",
+        "virtual",
+        "tap",
+        "hamachi",
+        "zero tier",
+        "zerotier",
+        "wireguard",
+        "openvpn",
+        "cisco",
+        "forticlient",
+        "pulse",
+    )
+    found_adapters = False
+    for line in adapter_output.splitlines():
+        stripped = line.strip()
+        if stripped and any(keyword in stripped.casefold() for keyword in vpn_keywords):
+            print(f"  {stripped}")
+            found_adapters = True
+    if not found_adapters:
+        print("  Nenhum adaptador virtual suspeito ativo.")
+
+
 def display_anota_connection() -> None:
     command = ["ping", "app.anota.ai", "-n", "4"] if platform.system() == "Windows" else ["ping", "-c", "4", "app.anota.ai"]
     result = _run(command, timeout=30)
