@@ -29,7 +29,7 @@ jobs:
 
       - name: Build executable
         run: |
-          python -m PyInstaller --noupx --onefile --windowed --icon=logo.ico --name "SuporteTools-AnotaAI" gui.py
+          python -m PyInstaller --noupx --onefile --windowed --icon=logo.ico --name "SuporteTools-AnotaAI" app.py
 
       - name: Upload artifact
         uses: actions/upload-artifact@v4

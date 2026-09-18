@@ -169,7 +169,7 @@ class SystemInfoBase:
         self._resource_monitor = None
 
     def _build_screen_shell(
-            parent: tk.Misc, title_text: str
+            self, parent: tk.Misc, title_text: str
         ) -> tuple[tk.Frame, tk.Frame]:
             """Cria o cabeçalho vermelho e a área de conteúdo compartilhada."""
             header = tk.Frame(parent, bg=PRIMARY_COLOR, height=HEADER_HEIGHT)
@@ -302,7 +302,7 @@ class SystemInfoBase:
             return results_frame
 
     def _make_button(
-            parent: tk.Misc,
+            self, parent: tk.Misc,
             label: str,
             action: Action,
             style_name: str = "Rounded.TButton",
@@ -776,7 +776,7 @@ class SystemInfoBase:
                 action()
             self._queue_command_output(captured.getvalue())
 
-    def _downloads_path() -> str:
+    def _downloads_path(self) -> str:
             if platform.system() == "Windows":
                 user_profile = os.environ.get("USERPROFILE")
                 if user_profile:
