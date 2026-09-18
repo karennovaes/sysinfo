@@ -33,21 +33,18 @@ if sys.stdout is None:
 if sys.stderr is None:
     sys.stderr = io.StringIO()
 
-from modules.compatibility_check import display_compatibility_check
 from modules.datetime_sync import display_datetime_sync
+from modules.printer_diagnostics import display_printer_diagnostics
 from modules.resource_monitor import create_resource_monitor
 from modules.speedtest import display_speed_test
 from modules.temp_cleaner import display_temp_cleaner
 from modules.security import calculate_sha256, log_audit, validate_url
 from modules.anota_process import (
     display_anota_processes,
-    display_restart_anota,
     scan_anota_installation,
 )
 from modules.uninstaller import display_uninstall
-from modules.maintenance import (
-    display_antivirus_status,
-)
+from modules.result_cards import Card, create_result_cards
 from modules.network_tools import (
     display_anota_connection,
     display_firewall_status,
@@ -203,6 +200,8 @@ class SystemDiagnosticsApp:
         self._scan_busy = False
         self._busy = False
         self._command_busy = False
+        self._card_queue: queue.Queue = queue.Queue()
+        self._card_busy = False
         self._active_screen = ""
         self._pending_tool_output = ""
         self._progress_total = 0
@@ -324,6 +323,8 @@ class SystemDiagnosticsApp:
             ("Teste de Velocidade", self._speed_test),
             ("Monitor de Recursos", self._monitor_cpu),
             ("Verificar Antivírus", self._check_antivirus),
+            ("Eventos do Windows", self._check_windows_events),
+            ("Windows Update", self._check_windows_update),
         ]
         results_frame = self._build_action_screen(
             body, "computer", definitions, with_progress=True
@@ -333,7 +334,7 @@ class SystemDiagnosticsApp:
         _, body = self._build_screen_shell(self.program_frame, "Programa — Anota AI")
         definitions = [
             ("Verificar Processos Ativos", self._check_anota_processes),
-            ("Reiniciar Anota AI", self._restart_anota),
+            ("Status do WhatsApp", self._check_whatsapp),
             ("Desinstalar Anota AI", self._uninstall_anota),
             ("Baixar Anota AI Desktop", self._download_desktop),
         ]
@@ -386,6 +387,7 @@ class SystemDiagnosticsApp:
         definitions = [
             ("Abrir Impressoras", self._open_printers),
             ("Limpar Fila de Impressão", self._clear_printer_queue),
+            ("Diagnóstico de Impressoras", self._check_printer_diag),
             ("Verificar PID na Porta 5000", self._check_port_5000),
             ("Baixar Instalador de Drivers", self._download_driver),
             ("Baixar NetStatGUI", self._download_netstatgui),
@@ -820,10 +822,8 @@ class SystemDiagnosticsApp:
         )
 
     def _check_compatibility(self) -> None:
-        self._start_operation(
-            "Compatibilidade",
-            [("VERIFICAÇÃO DE COMPATIBILIDADE", display_compatibility_check)],
-        )
+        from modules.compatibility_check import display_compatibility_check
+        self._start_operation("Compatibilidade", [("VERIFICAÇÃO DE COMPATIBILIDADE", display_compatibility_check)])
 
     def _speed_test(self) -> None:
         self._start_operation(
@@ -870,16 +870,109 @@ class SystemDiagnosticsApp:
             monitor_frame, on_close=_on_monitor_close
         )
 
+    def _show_cards_async(
+        self,
+        screen: str,
+        label: str,
+        data_func: Callable,
+        action_label: str | None = None,
+        action_callback=None,
+    ) -> None:
+        """Executa a coleta numa thread e mostra os cards via _card_queue."""
+        if self._busy or self._command_busy:
+            return
+        self._set_tool_busy(screen, label)
+        # Limpa a fila de cards
+        try:
+            while True:
+                self._card_queue.get_nowait()
+        except queue.Empty:
+            pass
+        self._card_busy = True
+
+        def _worker():
+            try:
+                cards = data_func()
+                self._card_queue.put(("cards", cards))
+            except Exception as exc:
+                self._card_queue.put(("error", str(exc)))
+
+        worker = threading.Thread(target=_worker, daemon=True, name="card-data")
+        worker.start()
+        self.root.after(50, lambda: self._process_card_result(screen, action_label, action_callback))
+
+    def _process_card_result(self, screen: str, action_label: str | None, action_callback) -> None:
+        """Processa o resultado da coleta de cards na thread principal."""
+        try:
+            msg_type, payload = self._card_queue.get_nowait()
+        except queue.Empty:
+            if self._card_busy:
+                self.root.after(50, lambda: self._process_card_result(screen, action_label, action_callback))
+            return
+
+        self._card_busy = False
+
+        if msg_type == "cards":
+            output_frame = self._output_frames.get(screen)
+            scrollbar = self._output_scrollbars.get(screen)
+            progress_frame = self._progress_frames.get(screen)
+            if output_frame is None:
+                self._set_tool_ready()
+                return
+            output_frame.grid_remove()
+            if scrollbar:
+                scrollbar.grid_remove()
+            if progress_frame:
+                progress_frame.grid_remove()
+            results_content = output_frame.master
+            cards_frame = tk.Frame(results_content, bg=BG_WHITE)
+            cards_frame.grid(row=1, column=0, sticky="nsew", padx=0, pady=0)
+            results_content.grid_rowconfigure(1, weight=1)
+            results_content.grid_columnconfigure(0, weight=1)
+
+            def _on_cards_close() -> None:
+                cards_frame.destroy()
+                output_frame.grid(row=1, column=0, sticky="nsew")
+                if scrollbar:
+                    scrollbar.grid(row=1, column=1, sticky="ns")
+                self._set_tool_ready()
+
+            create_result_cards(
+                cards_frame,
+                payload,
+                on_close=_on_cards_close,
+                action_label=action_label,
+                action_callback=action_callback,
+            )
+        elif msg_type == "error":
+            self._append_output(screen, f"Erro ao coletar dados: {payload}\n")
+            self._set_tool_ready()
+
     def _check_anota_processes(self) -> None:
         self._start_operation(
             "Verificar Processos Ativos", [("PROCESSOS ATIVOS DO ANOTA AI", display_anota_processes)], "program"
         )
 
-    def _restart_anota(self) -> None:
-        self._start_operation("Reiniciar Anota AI", [("REINICIAR ANOTA AI", display_restart_anota)], "program")
+    def _check_whatsapp(self) -> None:
+        from modules.whatsapp_status import display_whatsapp_status
+        self._start_command_thread("program", "Status do WhatsApp", lambda: self._queue_command_output_capture(display_whatsapp_status))
 
     def _check_antivirus(self) -> None:
+        from modules.maintenance import display_antivirus_status
         self._start_operation("Verificar Antivírus", [("STATUS DO ANTIVÍRUS", display_antivirus_status)])
+
+    def _check_windows_events(self) -> None:
+        from modules.windows_events import display_windows_events
+        self._start_operation("Eventos do Windows", [("EVENTOS DO WINDOWS", display_windows_events)])
+
+    def _check_windows_update(self) -> None:
+        from modules.windows_update import display_windows_update
+        self._start_operation("Windows Update", [("WINDOWS UPDATE", display_windows_update)])
+
+    def _open_windows_update_page(self) -> None:
+        if platform.system() != "Windows":
+            return
+        subprocess.Popen(["cmd", "/c", "start", "ms-settings:windowsupdate"], creationflags=_creation_flags(), startupinfo=_startup_info())
 
     def _uninstall_anota(self) -> None:
         """Confirma a desinstalação na thread principal antes do trabalho pesado."""
@@ -1054,6 +1147,11 @@ class SystemDiagnosticsApp:
     def _clear_printer_queue(self) -> None:
         self._start_command_thread(
             "printer", "Limpar Fila de Impressão", lambda: self._queue_command_output(_clear_print_queue())
+        )
+
+    def _check_printer_diag(self) -> None:
+        self._start_command_thread(
+            "printer", "Diagnóstico de Impressoras", lambda: self._queue_command_output_capture(display_printer_diagnostics)
         )
 
     def _check_port_5000(self) -> None:

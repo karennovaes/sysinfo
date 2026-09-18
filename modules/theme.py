@@ -1,16 +1,16 @@
 """Variáveis visuais compartilhadas pela interface do Diagnóstico do Sistema."""
 
 # Cores da interface.
-PRIMARY_COLOR = "#EA1D2F"
+PRIMARY_COLOR = "#1976D2"
 BG_WHITE = "#FFFFFF"
-BG_LIGHT = "#F7F7F8"
-BG_CARD = "#FAFAFA"
+BG_LIGHT = "#ECEFF1"
+BG_CARD = "#F5F5F5"
 SHADOW_COLOR = "#E0E0E0"
-TEXT_DARK = "#3F3E3E"
+TEXT_DARK = "#263238"
 TEXT_WHITE = "#FFFFFF"
 ACCENT_GREEN = "#2E7D32"
-HOVER_COLOR = "#C41523"
-BORDER_COLOR = "#E8E8E8"
+HOVER_COLOR = "#1565C0"
+BORDER_COLOR = "#CFD8DC"
 
 # Aliases semânticos usados pela interface e pela saída dos diagnósticos.
 SECONDARY_COLOR = TEXT_WHITE
@@ -27,7 +27,7 @@ FONT_TERMINAL = ("Consolas", 10)
 FONT_STATUS = ("Segoe UI", 9, "bold")
 
 # Estilos da tela principal.
-WINDOW_TITLE = "Suporte Tools"
+WINDOW_TITLE = "Diagnóstico do Sistema — Anota AI"
 HEADER_HEIGHT = 70
 SIDEBAR_WIDTH = 220
 PADDING_BODY = (12, 12)

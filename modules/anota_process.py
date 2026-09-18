@@ -373,49 +373,12 @@ def find_anota_executable() -> Path | None:
     return None
 
 
-def restart_anota() -> str:
-    """Encerra processos Anota, aguarda e inicia o executável encontrado."""
-    processes = list_anota_processes()
-    if platform.system() != "Windows":
-        return "Reinício do Anota AI disponível apenas no Windows."
-    killed = 0
-    for item in processes:
-        try:
-            result = subprocess.run(
-                ["taskkill", "/PID", str(item["pid"]), "/F"],
-                capture_output=True,
-                text=True,
-                timeout=15,
-                check=False,
-                creationflags=_creation_flags(),
-                startupinfo=_startup_info(),
-            )
-            if result.returncode == 0:
-                killed += 1
-        except (OSError, subprocess.SubprocessError):
-            continue
-    time.sleep(2)
-    executable = find_anota_executable()
-    if executable is None:
-        return f"{killed} processo(s) encerrado(s), mas o executável do Anota AI não foi encontrado."
-    try:
-        subprocess.Popen([str(executable)], creationflags=_creation_flags(), startupinfo=_startup_info())
-    except (OSError, subprocess.SubprocessError) as exc:
-        return f"{killed} processo(s) encerrado(s), mas não foi possível iniciar o Anota AI: {exc}"
-    return f"Anota AI reiniciado com sucesso ({killed} processo(s) encerrado(s)).\nExecutável: {executable}"
-
-
 def installed_version() -> str:
     """Retorna a versão e o caminho encontrados pelo scanner de instalação."""
     found, path, version = scan_anota_installation()
     if not found:
         return "Não encontrado"
     return f"Versão instalada: {version}\nExecutável ou pasta: {path}"
-
-
-def display_restart_anota() -> None:
-    print(restart_anota())
-
 
 def display_installed_version() -> None:
     print(installed_version())

@@ -42,6 +42,17 @@ def _powershell(command: str, args: list[str] | None = None, timeout: int = 30) 
     return (result.stdout or result.stderr or "Sem saída.").strip()
 
 
+def get_antivirus_status() -> dict[str, bool | str]:
+    """Retorna status do antivírus sem imprimir."""
+    if platform.system() != "Windows":
+        return {"antivirus": False, "realtime": False, "message": "disponível apenas no Windows"}
+    output = _powershell("Get-MpComputerStatus | Select-Object AntivirusEnabled, RealTimeProtectionEnabled | Format-List")
+    lowered = output.casefold()
+    antivirus_on = "antivirusenabled : true" in lowered
+    realtime_on = "realtimeprotectionenabled : true" in lowered
+    return {"antivirus": antivirus_on, "realtime": realtime_on, "message": output}
+
+
 def display_antivirus_status() -> None:
     if platform.system() != "Windows":
         print("Disponível apenas no Windows.")
