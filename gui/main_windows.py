@@ -106,20 +106,23 @@ class SystemInfoApp(
                 card.pack(fill="x", padx=PADX_BUTTONS, pady=(0, PADY_BUTTONS))
 
                 # Grupo ícone+texto centralizado horizontalmente no card.
-                # Os dois Labels ficam num Frame interno que é centralizado
-                # com pack(expand=True), mantendo o alinhamento vertical entre
-                # o emoji e a palavra.
+                # Usamos grid com uma única linha e âncora "center" nos dois
+                # widgets: assim o emoji e a palavra compartilham exatamente o
+                # mesmo centro vertical, independente da altura da linha.
                 group = tk.Frame(card, bg=BG_CARD)
                 group.pack(expand=True, pady=14)
 
+                # "Segoe UI Emoji" é a fonte que desenha os emojis no Windows
+                # com métricas consistentes; sem ela o glifo herda a fonte do
+                # texto e fica deslocado verticalmente.
                 icon_label = tk.Label(
                     group,
                     text=icon,
                     bg=BG_CARD,
                     fg=TEXT_DARK,
-                    font=(FONT_FAMILY, 16),
+                    font=("Segoe UI Emoji", 13),
                 )
-                icon_label.pack(side="left", padx=(0, 10))
+                icon_label.grid(row=0, column=0, padx=(0, 10), sticky="")
 
                 text_label = tk.Label(
                     group,
@@ -128,7 +131,11 @@ class SystemInfoApp(
                     fg=TEXT_DARK,
                     font=FONT_CARD,
                 )
-                text_label.pack(side="left")
+                text_label.grid(row=0, column=1, sticky="")
+
+                # Centraliza o conteúdo do grupo dentro do card.
+                group.grid_columnconfigure(0, weight=0)
+                group.grid_columnconfigure(1, weight=0)
 
                 # Clique em qualquer parte do card dispara a ação.
                 for widget in (card, group, icon_label, text_label):
