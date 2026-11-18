@@ -85,16 +85,72 @@ class SystemInfoApp(
                 font=FONT_HEADING,
             ).pack(pady=(0, 24))
             definitions = [
-                ("💻  Computador", lambda: self._show_frame(self.computer_frame)),
-                ("🧩  Programa", lambda: self._show_frame(self.program_frame)),
-                ("🌐  Rede", lambda: self._show_frame(self.network_frame)),
-                ("🖨️  Impressora", lambda: self._show_frame(self.printer_frame)),
+                ("💻", "Computador", lambda: self._show_frame(self.computer_frame)),
+                ("🧩", "Programa", lambda: self._show_frame(self.program_frame)),
+                ("🌐", "Rede", lambda: self._show_frame(self.network_frame)),
+                ("🖨️", "Impressora", lambda: self._show_frame(self.printer_frame)),
             ]
-            for label, action in definitions:
+            for icon, label, action in definitions:
                 shadow = tk.Frame(content, bg=SHADOW_COLOR)
                 shadow.pack(fill="x", pady=6)
-                button = self._make_button(shadow, label, action, style_name="Card.TButton")
-                button.pack(fill="x", padx=PADX_BUTTONS, pady=(0, PADY_BUTTONS))
+                # O card é um Frame com ícone e texto em colunas separadas.
+                # Isso garante alinhamento vertical consistente entre o emoji
+                # e a palavra, independente da fonte usada.
+                card = tk.Frame(
+                    shadow,
+                    bg=BG_CARD,
+                    highlightbackground=BORDER_COLOR,
+                    highlightthickness=1,
+                    cursor="hand2",
+                )
+                card.pack(fill="x", padx=PADX_BUTTONS, pady=(0, PADY_BUTTONS))
+
+                # Grupo ícone+texto centralizado horizontalmente no card.
+                # Os dois Labels ficam num Frame interno que é centralizado
+                # com pack(expand=True), mantendo o alinhamento vertical entre
+                # o emoji e a palavra.
+                group = tk.Frame(card, bg=BG_CARD)
+                group.pack(expand=True, pady=14)
+
+                icon_label = tk.Label(
+                    group,
+                    text=icon,
+                    bg=BG_CARD,
+                    fg=TEXT_DARK,
+                    font=(FONT_FAMILY, 16),
+                )
+                icon_label.pack(side="left", padx=(0, 10))
+
+                text_label = tk.Label(
+                    group,
+                    text=label,
+                    bg=BG_CARD,
+                    fg=TEXT_DARK,
+                    font=FONT_CARD,
+                )
+                text_label.pack(side="left")
+
+                # Clique em qualquer parte do card dispara a ação.
+                for widget in (card, group, icon_label, text_label):
+                    widget.bind("<Button-1>", lambda _event, cb=action: cb())
+                    widget.bind(
+                        "<Enter>",
+                        lambda _event, c=card, g=group, i=icon_label, t=text_label: (
+                            c.configure(bg=PRIMARY_LIGHT, highlightbackground=PRIMARY_COLOR),
+                            g.configure(bg=PRIMARY_LIGHT),
+                            i.configure(bg=PRIMARY_LIGHT),
+                            t.configure(bg=PRIMARY_LIGHT, fg=PRIMARY_DARK),
+                        ),
+                    )
+                    widget.bind(
+                        "<Leave>",
+                        lambda _event, c=card, g=group, i=icon_label, t=text_label: (
+                            c.configure(bg=BG_CARD, highlightbackground=BORDER_COLOR),
+                            g.configure(bg=BG_CARD),
+                            i.configure(bg=BG_CARD),
+                            t.configure(bg=BG_CARD, fg=TEXT_DARK),
+                        ),
+                    )
 _ICON_B64 = (
     """AAABAAQAEBAAAAAAIAClAgAARgAAACAgAAAAACAAbwYAAOsCAAAwMAAAAAAgAG0LAABaCQAAAAAA
 AAAAIADjqAAAxxQAAIlQTkcNChoKAAAADUlIRFIAAAAQAAAAEAgGAAAAH/P/YQAAAmxJREFUeJxt
