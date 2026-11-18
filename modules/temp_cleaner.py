@@ -9,6 +9,22 @@ from typing import Any
 
 from modules.security import log_audit
 
+# Pastas dentro do diretório do Anota AI que NÃO devem ser apagadas.
+# ``logs`` é usado pelo suporte para diagnóstico; ``config``/``settings``
+# guardam preferências do cliente. Só o cache real é removido.
+ANOTA_PRESERVED_DIRS = {
+    "logs",
+    "log",
+    "config",
+    "configs",
+    "settings",
+    "data",
+    "database",
+    "db",
+    "backup",
+    "backups",
+}
+
 
 def _empty_stats(path: str) -> dict[str, Any]:
     """Cria o conjunto de estatísticas de uma pasta temporária."""
@@ -94,6 +110,74 @@ def _clean_directory(path: str) -> dict[str, Any]:
     return stats
 
 
+def _clean_directory_preserving(
+    path: str, preserved_names: set[str]
+) -> dict[str, Any]:
+    """Limpa ``path`` sem tocar nas subpastas listadas em ``preserved_names``.
+
+    Diferente de :func:`_clean_directory`, esta versão percorre a árvore e
+    ignora completamente as subpastas preservadas (e todo o seu conteúdo),
+    mantendo logs e configurações intactos.
+    """
+    stats = _empty_stats(path)
+    if not path or not os.path.isdir(path):
+        return stats
+
+    preserved_lower = {name.casefold() for name in preserved_names}
+    files: list[str] = []
+    directories: list[str] = []
+    walk_errors: list[OSError] = []
+
+    def on_walk_error(error: OSError) -> None:
+        walk_errors.append(error)
+
+    try:
+        for root, dirnames, filenames in os.walk(
+            path, topdown=True, onerror=on_walk_error
+        ):
+            # Remove da varredura as pastas preservadas, impedindo que o
+            # os.walk desça nelas e que sejam adicionadas para remoção.
+            dirnames[:] = [
+                name for name in dirnames
+                if name.casefold() not in preserved_lower
+            ]
+            directories.extend(os.path.join(root, name) for name in dirnames)
+            files.extend(os.path.join(root, name) for name in filenames)
+    except OSError:
+        stats["arquivos_ignorados"] += 1
+        return stats
+
+    stats["arquivos_ignorados"] += len(walk_errors)
+
+    for file_path in files:
+        try:
+            size = os.path.getsize(file_path)
+        except OSError:
+            size = 0
+        try:
+            os.remove(file_path)
+        except OSError:
+            stats["arquivos_ignorados"] += 1
+            continue
+        stats["arquivos_deletados"] += 1
+        stats["espaco_liberado_mb"] += size / (1024 * 1024)
+
+    directories.sort(key=_directory_depth, reverse=True)
+    for directory in directories:
+        if not os.path.isdir(directory):
+            continue
+        # Segurança extra: nunca remover uma pasta preservada.
+        if os.path.basename(directory).casefold() in preserved_lower:
+            continue
+        try:
+            shutil.rmtree(directory)
+        except OSError:
+            stats["arquivos_ignorados"] += 1
+
+    stats["espaco_liberado_mb"] = round(stats["espaco_liberado_mb"], 2)
+    return stats
+
+
 def clean_temp() -> dict[str, Any]:
     """Limpa temporários e o cache do Anota AI e retorna estatísticas."""
     user_path = os.environ.get("TEMP", "%TEMP%", "")
@@ -115,7 +199,9 @@ def clean_temp() -> dict[str, Any]:
 
     result["temp_user"] = _clean_directory(user_path)
     result["temp_system"] = _clean_directory(system_path)
-    result["cache_anota"] = _clean_directory(anota_cache_path)
+    result["cache_anota"] = _clean_directory_preserving(
+        anota_cache_path, ANOTA_PRESERVED_DIRS
+    )
     folders = (
         result["temp_user"],
         result["temp_system"],
@@ -163,3 +249,11 @@ def display_temp_cleaner() -> None:
             f"{anota_cache['arquivos_deletados']} no cache Anota AI"
         )
     print(f"({', '.join(summary)})")
+    if os.path.isdir(anota_cache["caminho"]):
+        preserved = sorted(
+            name for name in os.listdir(anota_cache["caminho"])
+            if name.casefold() in ANOTA_PRESERVED_DIRS
+            and os.path.isdir(os.path.join(anota_cache["caminho"], name))
+        )
+        if preserved:
+            print(f"Preservado no Anota AI: {', '.join(preserved)}")
