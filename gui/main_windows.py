@@ -105,42 +105,48 @@ class SystemInfoApp(
                 )
                 card.pack(fill="x", padx=PADX_BUTTONS, pady=(0, PADY_BUTTONS))
 
+                # Grupo ícone+texto centralizado horizontalmente no card.
+                # Os dois Labels ficam num Frame interno que é centralizado
+                # com pack(expand=True), mantendo o alinhamento vertical entre
+                # o emoji e a palavra.
+                group = tk.Frame(card, bg=BG_CARD)
+                group.pack(expand=True, pady=14)
+
                 icon_label = tk.Label(
-                    card,
+                    group,
                     text=icon,
                     bg=BG_CARD,
                     fg=TEXT_DARK,
                     font=(FONT_FAMILY, 16),
-                    width=3,
-                    anchor="center",
                 )
-                icon_label.pack(side="left", padx=(18, 0), pady=14)
+                icon_label.pack(side="left", padx=(0, 10))
 
                 text_label = tk.Label(
-                    card,
+                    group,
                     text=label,
                     bg=BG_CARD,
                     fg=TEXT_DARK,
                     font=FONT_CARD,
-                    anchor="w",
                 )
-                text_label.pack(side="left", padx=(10, 18), pady=14, fill="x", expand=True)
+                text_label.pack(side="left")
 
                 # Clique em qualquer parte do card dispara a ação.
-                for widget in (card, icon_label, text_label):
+                for widget in (card, group, icon_label, text_label):
                     widget.bind("<Button-1>", lambda _event, cb=action: cb())
                     widget.bind(
                         "<Enter>",
-                        lambda _event, c=card, i=icon_label, t=text_label: (
+                        lambda _event, c=card, g=group, i=icon_label, t=text_label: (
                             c.configure(bg=PRIMARY_LIGHT, highlightbackground=PRIMARY_COLOR),
+                            g.configure(bg=PRIMARY_LIGHT),
                             i.configure(bg=PRIMARY_LIGHT),
                             t.configure(bg=PRIMARY_LIGHT, fg=PRIMARY_DARK),
                         ),
                     )
                     widget.bind(
                         "<Leave>",
-                        lambda _event, c=card, i=icon_label, t=text_label: (
+                        lambda _event, c=card, g=group, i=icon_label, t=text_label: (
                             c.configure(bg=BG_CARD, highlightbackground=BORDER_COLOR),
+                            g.configure(bg=BG_CARD),
                             i.configure(bg=BG_CARD),
                             t.configure(bg=BG_CARD, fg=TEXT_DARK),
                         ),
