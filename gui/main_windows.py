@@ -33,7 +33,23 @@ class SystemInfoApp(
         self.root.geometry("700x500")
         self.root.minsize(500, 400)
         self.root.resizable(True, True)
-        self.root.configure(bg=BG_WHITE)
+        self.root.configure(bg=BG_LIGHT)
+        # Resolve a fonte antes de montar a interface: usa Roboto quando
+        # instalada e cai para Segoe UI caso contrário.
+        from gui.styles import resolve_font_family
+
+        family = resolve_font_family(self.root)
+        if family != FONT_FAMILY:
+            import modules.theme as theme_module
+
+            theme_module.FONT_TITLE = (family, 15, "bold")
+            theme_module.FONT_HEADING = (family, 17, "bold")
+            theme_module.FONT_SUBHEADING = (family, 12, "bold")
+            theme_module.FONT_BUTTON = (family, 10)
+            theme_module.FONT_BUTTON_BOLD = (family, 10, "bold")
+            theme_module.FONT_CARD = (family, 11, "bold")
+            theme_module.FONT_BODY = (family, 10)
+            theme_module.FONT_STATUS = (family, 9, "bold")
         setup_styles(ttk.Style(self.root))
         super().__init__(root)
         self._build_ui()
@@ -56,7 +72,7 @@ class SystemInfoApp(
             _, body = self._build_screen_shell(self.initial_frame, WINDOW_TITLE)
             content = tk.Frame(
                 body,
-                bg=BG_WHITE,
+                bg=BG_LIGHT,
                 padx=PADDING_CONTENT[0],
                 pady=PADDING_CONTENT[1],
             )
@@ -64,7 +80,7 @@ class SystemInfoApp(
             tk.Label(
                 content,
                 text="Selecione uma categoria",
-                bg=BG_WHITE,
+                bg=BG_LIGHT,
                 fg=TEXT_DARK,
                 font=FONT_HEADING,
             ).pack(pady=(0, 24))

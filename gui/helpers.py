@@ -135,13 +135,13 @@ class SystemInfoBase:
 
     def __init__(self, root: tk.Tk) -> None:
         self.root = root
-        self.container = tk.Frame(self.root, bg=BG_WHITE)
+        self.container = tk.Frame(self.root, bg=BG_LIGHT)
         self.container.pack(fill="both", expand=True)
-        self.initial_frame = tk.Frame(self.container, bg=BG_WHITE)
-        self.computer_frame = tk.Frame(self.container, bg=BG_WHITE)
-        self.program_frame = tk.Frame(self.container, bg=BG_WHITE)
-        self.printer_frame = tk.Frame(self.container, bg=BG_WHITE)
-        self.network_frame = tk.Frame(self.container, bg=BG_WHITE)
+        self.initial_frame = tk.Frame(self.container, bg=BG_LIGHT)
+        self.computer_frame = tk.Frame(self.container, bg=BG_LIGHT)
+        self.program_frame = tk.Frame(self.container, bg=BG_LIGHT)
+        self.printer_frame = tk.Frame(self.container, bg=BG_LIGHT)
+        self.network_frame = tk.Frame(self.container, bg=BG_LIGHT)
         self._frames = (self.initial_frame, self.computer_frame, self.program_frame, self.printer_frame, self.network_frame)
         self._buttons: dict[str, list[ttk.Button]] = {}
         self._button_labels: dict[ttk.Button, str] = {}
@@ -164,6 +164,8 @@ class SystemInfoBase:
         self._card_busy = False
         self._active_screen = ""
         self._pending_tool_output = ""
+        # Histórico acumulado da sessão, usado para gerar o relatório.
+        self._session_output = ""
         self._progress_total = 0
         self._progress_current = 0
         self._resource_monitor = None
@@ -171,10 +173,36 @@ class SystemInfoBase:
     def _build_screen_shell(
             self, parent: tk.Misc, title_text: str
         ) -> tuple[tk.Frame, tk.Frame]:
-            """Cria o cabeçalho vermelho e a área de conteúdo compartilhada."""
+            """Cria o cabeçalho azul e a área de conteúdo compartilhada.
+
+            O cabeçalho tem o título à esquerda e, na tela inicial, o botão
+            "Gerar Relatório" alinhado à direita. O relatório considera os
+            procedimentos de todas as abas, por isso fica na tela inicial.
+            """
             header = tk.Frame(parent, bg=PRIMARY_COLOR, height=HEADER_HEIGHT)
             header.pack(fill="x")
             header.pack_propagate(False)
+
+            # Botão do relatório à direita (criado antes do título para que o
+            # pack reserve o espaço à direita e o título ocupe o restante).
+            if title_text == WINDOW_TITLE:
+                self._report_button = tk.Button(
+                    header,
+                    text="Gerar Relatório",
+                    command=self._generate_report,
+                    bg=BG_WHITE,
+                    fg=PRIMARY_COLOR,
+                    activebackground=PRIMARY_LIGHT,
+                    activeforeground=PRIMARY_DARK,
+                    font=FONT_BUTTON_BOLD,
+                    relief="flat",
+                    borderwidth=0,
+                    padx=16,
+                    pady=6,
+                    cursor="hand2",
+                )
+                self._report_button.pack(side="right", padx=(0, 18))
+
             tk.Label(
                 header,
                 text=title_text,
@@ -183,8 +211,8 @@ class SystemInfoBase:
                 anchor="w",
                 font=FONT_TITLE,
                 padx=20,
-            ).pack(fill="both", expand=True)
-            body = tk.Frame(parent, bg=BG_WHITE)
+            ).pack(side="left", fill="both", expand=True)
+            body = tk.Frame(parent, bg=BG_LIGHT)
             body.pack(fill="both", expand=True)
             return header, body
 
@@ -196,16 +224,16 @@ class SystemInfoBase:
             with_progress: bool = False,
         ) -> tk.Frame:
             """Cria a composição horizontal: botões à esquerda e terminal à direita."""
-            sidebar = tk.Frame(body, bg=BG_LIGHT, width=SIDEBAR_WIDTH)
+            sidebar = tk.Frame(body, bg=BG_SIDEBAR, width=SIDEBAR_WIDTH)
             sidebar.pack(side="left", fill="y")
             sidebar.pack_propagate(False)
             # O menu lateral pode conter mais ações do que a altura disponível.
             # O canvas mantém os botões acessíveis sem aumentar a janela inteira.
-            actions_view = tk.Frame(sidebar, bg=BG_LIGHT)
+            actions_view = tk.Frame(sidebar, bg=BG_SIDEBAR)
             actions_view.pack(fill="both", expand=True)
             actions_canvas = tk.Canvas(
                 actions_view,
-                bg=BG_LIGHT,
+                bg=BG_SIDEBAR,
                 highlightthickness=0,
                 borderwidth=0,
             )
@@ -213,7 +241,7 @@ class SystemInfoBase:
                 actions_view,
                 orient="vertical",
                 command=actions_canvas.yview,
-                troughcolor=BG_LIGHT,
+                troughcolor=BG_SIDEBAR,
                 activebackground=PRIMARY_COLOR,
                 relief="flat",
                 borderwidth=0,
@@ -223,7 +251,7 @@ class SystemInfoBase:
             actions_scrollbar.pack(side="right", fill="y")
             actions = tk.Frame(
                 actions_canvas,
-                bg=BG_LIGHT,
+                bg=BG_SIDEBAR,
                 padx=PADX_SIDEBAR,
                 pady=PADY_SIDEBAR,
             )
@@ -274,12 +302,12 @@ class SystemInfoBase:
             self._buttons[screen] = buttons
 
             results_frame = self._build_results(body, screen, with_progress)
-            footer = tk.Frame(sidebar, bg=BG_LIGHT, padx=12, pady=10)
+            footer = tk.Frame(sidebar, bg=BG_SIDEBAR, padx=12, pady=10)
             footer.pack(side="bottom", fill="x")
             status = tk.Label(
                 footer,
                 text="Status: Pronto",
-                bg=BG_LIGHT,
+                bg=BG_SIDEBAR,
                 fg=ACCENT_GREEN,
                 anchor="w",
                 font=FONT_STATUS,
@@ -328,7 +356,7 @@ class SystemInfoBase:
     def _build_results(self, body: tk.Frame, screen: str, with_progress: bool) -> tk.Frame:
             results_frame = tk.Frame(
                 body,
-                bg=BG_WHITE,
+                bg=BG_LIGHT,
                 padx=PADDING_BODY[0],
                 pady=PADDING_BODY[1],
             )
@@ -336,20 +364,20 @@ class SystemInfoBase:
             # Mantém o scanner (que usa pack) separado dos widgets de resultados,
             # que usam grid. Assim o card pode ser inserido no topo depois que a
             # tela for montada sem conflito entre gerenciadores de geometria.
-            results_content = tk.Frame(results_frame, bg=BG_WHITE)
+            results_content = tk.Frame(results_frame, bg=BG_CARD)
             results_content.pack(fill="both", expand=True)
             row = 0
             progress_frame = None
             progress_label = None
             progress_bar = None
             if with_progress:
-                progress_frame = tk.Frame(results_content, bg=BG_WHITE)
+                progress_frame = tk.Frame(results_content, bg=BG_CARD)
                 progress_frame.grid(row=0, column=0, sticky="ew", pady=(0, 8))
                 progress_frame.grid_columnconfigure(0, weight=1)
                 progress_label = tk.Label(
                     progress_frame,
                     text="",
-                    bg=BG_WHITE,
+                    bg=BG_CARD,
                     fg=TEXT_DARK,
                     anchor="w",
                     font=FONT_STATUS,
@@ -371,7 +399,7 @@ class SystemInfoBase:
             output = tk.Text(
                 output_frame,
                 wrap="word",
-                bg=BG_WHITE,
+                bg=BG_CARD,
                 fg=TEXT_DARK,
                 insertbackground=TEXT_DARK,
                 font=FONT_TERMINAL,
@@ -441,6 +469,7 @@ class SystemInfoBase:
     def _append_command_output(self, text: str) -> None:
             if self._active_screen:
                 self._append_output(self._active_screen, text)
+                self._session_output += text
 
     def _clear_screen_output(self, screen: str) -> None:
             if self._busy or self._command_busy:
@@ -507,7 +536,7 @@ class SystemInfoBase:
     def _set_tool_busy(self, screen: str, label: str) -> None:
             self._busy = True
             self._active_screen = screen
-            self._statuses[screen].configure(text="Status: Executando...", fg=PRIMARY_COLOR)
+            self._statuses[screen].configure(text="Status: Executando...", fg=ACCENT_YELLOW)
             for button in self._buttons[screen]:
                 button.configure(state="disabled")
                 if self._button_labels[button] == label:
@@ -584,6 +613,7 @@ class SystemInfoBase:
                         )
             elif message_type == "done":
                 self._append_output(self._active_screen, self._pending_tool_output)
+                self._session_output += self._pending_tool_output
                 if self._active_screen == "computer":
                     self._hide_progress()
                 self._set_tool_ready()
@@ -646,7 +676,7 @@ class SystemInfoBase:
                 if progress_frame:
                     progress_frame.grid_remove()
                 results_content = output_frame.master
-                cards_frame = tk.Frame(results_content, bg=BG_WHITE)
+                cards_frame = tk.Frame(results_content, bg=BG_CARD)
                 cards_frame.grid(row=1, column=0, sticky="nsew", padx=0, pady=0)
                 results_content.grid_rowconfigure(1, weight=1)
                 results_content.grid_columnconfigure(0, weight=1)
@@ -674,7 +704,7 @@ class SystemInfoBase:
     def _set_command_busy(self, screen: str, label: str) -> None:
             self._command_busy = True
             self._active_screen = screen
-            self._statuses[screen].configure(text="Status: Executando...", fg=PRIMARY_COLOR)
+            self._statuses[screen].configure(text="Status: Executando...", fg=ACCENT_YELLOW)
             for button in self._buttons[screen]:
                 button.configure(state="disabled")
                 if self._button_labels[button] == label:
@@ -775,6 +805,45 @@ class SystemInfoBase:
             with redirect_stdout(captured):
                 action()
             self._queue_command_output(captured.getvalue())
+
+    def _generate_report(self) -> None:
+            """Gera o relatório da sessão e copia para a área de transferência."""
+            from tkinter import messagebox
+
+            from modules.report import build_report
+
+            if not self._session_output.strip():
+                messagebox.showinfo(
+                    "Relatório",
+                    "Nenhum procedimento foi executado nesta sessão.\n"
+                    "Rode algum diagnóstico primeiro.",
+                )
+                return
+
+            report = build_report(self._session_output)
+            self.root.clipboard_clear()
+            self.root.clipboard_append(report)
+            self.root.update()
+
+            self._append_output(self._active_screen or "computer", "\n" + report + "\n")
+            messagebox.showinfo(
+                "Relatório copiado",
+                "O relatório foi copiado para a área de transferência.\n"
+                "Cole no atendimento com Ctrl+V.",
+            )
+
+    def _clear_session_output(self) -> None:
+            """Zera o histórico usado pelo relatório."""
+            from tkinter import messagebox
+
+            if not self._session_output.strip():
+                return
+            if messagebox.askyesno(
+                "Limpar histórico",
+                "Zerar o histórico da sessão? O relatório passará a considerar "
+                "apenas os próximos procedimentos.",
+            ):
+                self._session_output = ""
 
     def _downloads_path(self) -> str:
             if platform.system() == "Windows":
