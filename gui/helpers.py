@@ -175,8 +175,9 @@ class SystemInfoBase:
         ) -> tuple[tk.Frame, tk.Frame]:
             """Cria o cabeçalho azul e a área de conteúdo compartilhada.
 
-            O cabeçalho tem o título à esquerda e, quando a tela é a de
-            Computador, o botão "Gerar Relatório" alinhado à direita.
+            O cabeçalho tem o título à esquerda e, na tela inicial, o botão
+            "Gerar Relatório" alinhado à direita. O relatório considera os
+            procedimentos de todas as abas, por isso fica na tela inicial.
             """
             header = tk.Frame(parent, bg=PRIMARY_COLOR, height=HEADER_HEIGHT)
             header.pack(fill="x")
@@ -184,7 +185,7 @@ class SystemInfoBase:
 
             # Botão do relatório à direita (criado antes do título para que o
             # pack reserve o espaço à direita e o título ocupe o restante).
-            if title_text.startswith("Computador"):
+            if title_text == WINDOW_TITLE:
                 self._report_button = tk.Button(
                     header,
                     text="Gerar Relatório",
