@@ -135,13 +135,13 @@ class SystemInfoBase:
 
     def __init__(self, root: tk.Tk) -> None:
         self.root = root
-        self.container = tk.Frame(self.root, bg=BG_WHITE)
+        self.container = tk.Frame(self.root, bg=BG_LIGHT)
         self.container.pack(fill="both", expand=True)
-        self.initial_frame = tk.Frame(self.container, bg=BG_WHITE)
-        self.computer_frame = tk.Frame(self.container, bg=BG_WHITE)
-        self.program_frame = tk.Frame(self.container, bg=BG_WHITE)
-        self.printer_frame = tk.Frame(self.container, bg=BG_WHITE)
-        self.network_frame = tk.Frame(self.container, bg=BG_WHITE)
+        self.initial_frame = tk.Frame(self.container, bg=BG_LIGHT)
+        self.computer_frame = tk.Frame(self.container, bg=BG_LIGHT)
+        self.program_frame = tk.Frame(self.container, bg=BG_LIGHT)
+        self.printer_frame = tk.Frame(self.container, bg=BG_LIGHT)
+        self.network_frame = tk.Frame(self.container, bg=BG_LIGHT)
         self._frames = (self.initial_frame, self.computer_frame, self.program_frame, self.printer_frame, self.network_frame)
         self._buttons: dict[str, list[ttk.Button]] = {}
         self._button_labels: dict[ttk.Button, str] = {}
@@ -191,16 +191,16 @@ class SystemInfoBase:
                     command=self._generate_report,
                     bg=BG_WHITE,
                     fg=PRIMARY_COLOR,
-                    activebackground=BG_LIGHT,
-                    activeforeground=PRIMARY_COLOR,
-                    font=FONT_STATUS,
+                    activebackground=PRIMARY_LIGHT,
+                    activeforeground=PRIMARY_DARK,
+                    font=FONT_BUTTON_BOLD,
                     relief="flat",
                     borderwidth=0,
-                    padx=14,
-                    pady=4,
+                    padx=16,
+                    pady=6,
                     cursor="hand2",
                 )
-                self._report_button.pack(side="right", padx=(0, 16))
+                self._report_button.pack(side="right", padx=(0, 18))
 
             tk.Label(
                 header,
@@ -211,7 +211,7 @@ class SystemInfoBase:
                 font=FONT_TITLE,
                 padx=20,
             ).pack(side="left", fill="both", expand=True)
-            body = tk.Frame(parent, bg=BG_WHITE)
+            body = tk.Frame(parent, bg=BG_LIGHT)
             body.pack(fill="both", expand=True)
             return header, body
 
@@ -223,16 +223,16 @@ class SystemInfoBase:
             with_progress: bool = False,
         ) -> tk.Frame:
             """Cria a composição horizontal: botões à esquerda e terminal à direita."""
-            sidebar = tk.Frame(body, bg=BG_LIGHT, width=SIDEBAR_WIDTH)
+            sidebar = tk.Frame(body, bg=BG_SIDEBAR, width=SIDEBAR_WIDTH)
             sidebar.pack(side="left", fill="y")
             sidebar.pack_propagate(False)
             # O menu lateral pode conter mais ações do que a altura disponível.
             # O canvas mantém os botões acessíveis sem aumentar a janela inteira.
-            actions_view = tk.Frame(sidebar, bg=BG_LIGHT)
+            actions_view = tk.Frame(sidebar, bg=BG_SIDEBAR)
             actions_view.pack(fill="both", expand=True)
             actions_canvas = tk.Canvas(
                 actions_view,
-                bg=BG_LIGHT,
+                bg=BG_SIDEBAR,
                 highlightthickness=0,
                 borderwidth=0,
             )
@@ -240,7 +240,7 @@ class SystemInfoBase:
                 actions_view,
                 orient="vertical",
                 command=actions_canvas.yview,
-                troughcolor=BG_LIGHT,
+                troughcolor=BG_SIDEBAR,
                 activebackground=PRIMARY_COLOR,
                 relief="flat",
                 borderwidth=0,
@@ -250,7 +250,7 @@ class SystemInfoBase:
             actions_scrollbar.pack(side="right", fill="y")
             actions = tk.Frame(
                 actions_canvas,
-                bg=BG_LIGHT,
+                bg=BG_SIDEBAR,
                 padx=PADX_SIDEBAR,
                 pady=PADY_SIDEBAR,
             )
@@ -301,12 +301,12 @@ class SystemInfoBase:
             self._buttons[screen] = buttons
 
             results_frame = self._build_results(body, screen, with_progress)
-            footer = tk.Frame(sidebar, bg=BG_LIGHT, padx=12, pady=10)
+            footer = tk.Frame(sidebar, bg=BG_SIDEBAR, padx=12, pady=10)
             footer.pack(side="bottom", fill="x")
             status = tk.Label(
                 footer,
                 text="Status: Pronto",
-                bg=BG_LIGHT,
+                bg=BG_SIDEBAR,
                 fg=ACCENT_GREEN,
                 anchor="w",
                 font=FONT_STATUS,
@@ -355,7 +355,7 @@ class SystemInfoBase:
     def _build_results(self, body: tk.Frame, screen: str, with_progress: bool) -> tk.Frame:
             results_frame = tk.Frame(
                 body,
-                bg=BG_WHITE,
+                bg=BG_LIGHT,
                 padx=PADDING_BODY[0],
                 pady=PADDING_BODY[1],
             )
@@ -363,20 +363,20 @@ class SystemInfoBase:
             # Mantém o scanner (que usa pack) separado dos widgets de resultados,
             # que usam grid. Assim o card pode ser inserido no topo depois que a
             # tela for montada sem conflito entre gerenciadores de geometria.
-            results_content = tk.Frame(results_frame, bg=BG_WHITE)
+            results_content = tk.Frame(results_frame, bg=BG_CARD)
             results_content.pack(fill="both", expand=True)
             row = 0
             progress_frame = None
             progress_label = None
             progress_bar = None
             if with_progress:
-                progress_frame = tk.Frame(results_content, bg=BG_WHITE)
+                progress_frame = tk.Frame(results_content, bg=BG_CARD)
                 progress_frame.grid(row=0, column=0, sticky="ew", pady=(0, 8))
                 progress_frame.grid_columnconfigure(0, weight=1)
                 progress_label = tk.Label(
                     progress_frame,
                     text="",
-                    bg=BG_WHITE,
+                    bg=BG_CARD,
                     fg=TEXT_DARK,
                     anchor="w",
                     font=FONT_STATUS,
@@ -398,7 +398,7 @@ class SystemInfoBase:
             output = tk.Text(
                 output_frame,
                 wrap="word",
-                bg=BG_WHITE,
+                bg=BG_CARD,
                 fg=TEXT_DARK,
                 insertbackground=TEXT_DARK,
                 font=FONT_TERMINAL,
@@ -535,7 +535,7 @@ class SystemInfoBase:
     def _set_tool_busy(self, screen: str, label: str) -> None:
             self._busy = True
             self._active_screen = screen
-            self._statuses[screen].configure(text="Status: Executando...", fg=PRIMARY_COLOR)
+            self._statuses[screen].configure(text="Status: Executando...", fg=ACCENT_YELLOW)
             for button in self._buttons[screen]:
                 button.configure(state="disabled")
                 if self._button_labels[button] == label:
@@ -675,7 +675,7 @@ class SystemInfoBase:
                 if progress_frame:
                     progress_frame.grid_remove()
                 results_content = output_frame.master
-                cards_frame = tk.Frame(results_content, bg=BG_WHITE)
+                cards_frame = tk.Frame(results_content, bg=BG_CARD)
                 cards_frame.grid(row=1, column=0, sticky="nsew", padx=0, pady=0)
                 results_content.grid_rowconfigure(1, weight=1)
                 results_content.grid_columnconfigure(0, weight=1)
@@ -703,7 +703,7 @@ class SystemInfoBase:
     def _set_command_busy(self, screen: str, label: str) -> None:
             self._command_busy = True
             self._active_screen = screen
-            self._statuses[screen].configure(text="Status: Executando...", fg=PRIMARY_COLOR)
+            self._statuses[screen].configure(text="Status: Executando...", fg=ACCENT_YELLOW)
             for button in self._buttons[screen]:
                 button.configure(state="disabled")
                 if self._button_labels[button] == label:
