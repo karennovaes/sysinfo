@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import ctypes
 import platform
 import re
 import subprocess
@@ -175,6 +176,16 @@ def check_automatic_sync(
     }
 
 
+def _is_admin() -> bool:
+    """Retorna True quando o processo está elevado no Windows."""
+    if platform.system() != "Windows":
+        return False
+    try:
+        return bool(ctypes.windll.shell32.IsUserAnAdmin())
+    except (AttributeError, OSError):
+        return False
+
+
 def _run_hidden(command: list[str], timeout: int = 30) -> subprocess.CompletedProcess[str] | None:
     """Executa um comando oculto e devolve o resultado, ou None em falha."""
     try:
@@ -229,23 +240,46 @@ def _enable_automatic_time() -> tuple[bool, str]:
         if result is None or result.returncode != 0:
             failures.append(" ".join(command[:4]))
 
-    # Ativa o fuso horário automático via PowerShell (Set-TimeZone com -Auto)
-    tz_result = _run_hidden(
+    # Ativa o fuso horário automático.
+    # O serviço tzautoupdate não existe em todas as edições do Windows; nesse
+    # caso o ajuste é feito apenas pelo registro, que é o que a interface de
+    # Configurações lê para exibir "Definir fuso horário automaticamente".
+    tz_ok = True
+    tz_details: list[str] = []
+
+    # 1) Registro: Start=2 (automático) na chave do serviço de fuso.
+    reg_result = _run_hidden(
         [
-            "powershell", "-NoProfile", "-NonInteractive", "-Command",
-            "Set-Service -Name tzautoupdate -StartupType Automatic -ErrorAction SilentlyContinue; "
-            "Start-Service -Name tzautoupdate -ErrorAction SilentlyContinue; "
-            "Set-ItemProperty -Path 'HKLM:\SYSTEM\CurrentControlSet\Services\tzautoupdate' "
-            "-Name Start -Value 2 -ErrorAction SilentlyContinue",
+            "reg", "add",
+            r"HKLM\SYSTEM\CurrentControlSet\Services\tzautoupdate",
+            "/v", "Start", "/t", "REG_DWORD", "/d", "2", "/f",
         ],
-        timeout=30,
+        timeout=15,
     )
-    if tz_result is None or tz_result.returncode != 0:
-        failures.append("tzautoupdate")
+    if reg_result is None or reg_result.returncode != 0:
+        tz_ok = False
+        tz_details.append("reg add tzautoupdate")
+
+    # 2) Serviço tzautoupdate: tenta configurar, mas ausência não é erro fatal.
+    service = _run_hidden(
+        ["sc", "config", "tzautoupdate", "start=", "auto"], timeout=15
+    )
+    if service is not None and service.returncode == 0:
+        _run_hidden(["net", "start", "tzautoupdate"], timeout=20)
+        tz_details.append("serviço tzautoupdate configurado")
+    else:
+        tz_details.append(
+            "serviço tzautoupdate indisponível nesta edição do Windows "
+            "(ajuste aplicado via registro)"
+        )
+
+    if not tz_ok:
+        failures.append("tzautoupdate (registro)")
 
     if failures:
         return False, "falha ao configurar: " + ", ".join(failures)
-    return True, "hora e fuso automáticos ativados"
+    detail = "; ".join(tz_details) if tz_details else "hora e fuso automáticos ativados"
+    return True, detail
 
 
 def _set_ntp_server() -> tuple[bool, str]:
@@ -292,6 +326,24 @@ def synchronize_ntp(
             "steps": [],
         }
 
+    # Sem elevação, todos os comandos abaixo falham com "Acesso negado".
+    # Avisa antes de tentar, para o diagnóstico ficar claro.
+    if not _is_admin():
+        return {
+            "available": True,
+            "success": False,
+            "message": (
+                "o programa não está sendo executado como Administrador. "
+                "Feche e abra novamente com 'Executar como administrador'."
+            ),
+            "server": NTP_SERVER,
+            "steps": [(
+                "Privilégios de administrador",
+                False,
+                "Acesso negado: reabra o programa como administrador",
+            )],
+        }
+
     steps: list[tuple[str, bool, str]] = []
 
     # --- Etapa 1: serviço Windows Time ativo e automático ---
@@ -301,12 +353,16 @@ def synchronize_ntp(
                   _completed_output(service) if service else "falha ao executar sc config"))
 
     start = _run_hidden(["net", "start", "w32time"], timeout=30)
-    start_ok = start is not None and start.returncode == 0
-    # Código 2 costuma significar "já está em execução" — tratamos como sucesso.
-    if start is not None and start.returncode == 2:
+    start_output = _completed_output(start) if start else "falha ao executar net start"
+    # Só é sucesso se o serviço realmente estiver RUNNING depois da tentativa.
+    # Código 2 do "net start" pode significar "já iniciado", mas também aparece
+    # junto de "Acesso negado" — por isso confirmamos o estado real do serviço.
+    verify = _run_hidden(["sc", "query", "w32time"], timeout=15)
+    verify_output = _completed_output(verify).upper() if verify else ""
+    start_ok = "RUNNING" in verify_output
+    if not start_ok and start is not None and start.returncode == 2 and "ACESSO NEGADO" not in start_output.upper():
         start_ok = True
-    steps.append(("Serviço Windows Time iniciado", start_ok,
-                  _completed_output(start) if start else "falha ao executar net start"))
+    steps.append(("Serviço Windows Time iniciado", start_ok, start_output))
 
     # --- Etapa 2: hora e fuso automáticos ---
     auto_ok, auto_msg = _enable_automatic_time()
