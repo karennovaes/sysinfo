@@ -164,6 +164,8 @@ class SystemInfoBase:
         self._card_busy = False
         self._active_screen = ""
         self._pending_tool_output = ""
+        # Histórico acumulado da sessão, usado para gerar o relatório.
+        self._session_output = ""
         self._progress_total = 0
         self._progress_current = 0
         self._resource_monitor = None
@@ -441,6 +443,7 @@ class SystemInfoBase:
     def _append_command_output(self, text: str) -> None:
             if self._active_screen:
                 self._append_output(self._active_screen, text)
+                self._session_output += text
 
     def _clear_screen_output(self, screen: str) -> None:
             if self._busy or self._command_busy:
@@ -584,6 +587,7 @@ class SystemInfoBase:
                         )
             elif message_type == "done":
                 self._append_output(self._active_screen, self._pending_tool_output)
+                self._session_output += self._pending_tool_output
                 if self._active_screen == "computer":
                     self._hide_progress()
                 self._set_tool_ready()
@@ -775,6 +779,45 @@ class SystemInfoBase:
             with redirect_stdout(captured):
                 action()
             self._queue_command_output(captured.getvalue())
+
+    def _generate_report(self) -> None:
+            """Gera o relatório da sessão e copia para a área de transferência."""
+            from tkinter import messagebox
+
+            from modules.report import build_report
+
+            if not self._session_output.strip():
+                messagebox.showinfo(
+                    "Relatório",
+                    "Nenhum procedimento foi executado nesta sessão.\n"
+                    "Rode algum diagnóstico primeiro.",
+                )
+                return
+
+            report = build_report(self._session_output)
+            self.root.clipboard_clear()
+            self.root.clipboard_append(report)
+            self.root.update()
+
+            self._append_output(self._active_screen or "computer", "\n" + report + "\n")
+            messagebox.showinfo(
+                "Relatório copiado",
+                "O relatório foi copiado para a área de transferência.\n"
+                "Cole no atendimento com Ctrl+V.",
+            )
+
+    def _clear_session_output(self) -> None:
+            """Zera o histórico usado pelo relatório."""
+            from tkinter import messagebox
+
+            if not self._session_output.strip():
+                return
+            if messagebox.askyesno(
+                "Limpar histórico",
+                "Zerar o histórico da sessão? O relatório passará a considerar "
+                "apenas os próximos procedimentos.",
+            ):
+                self._session_output = ""
 
     def _downloads_path(self) -> str:
             if platform.system() == "Windows":
