@@ -37,7 +37,6 @@ class ComputerTabMixin:
                 ("Verificar Antivírus", self._check_antivirus),
                 ("Eventos do Windows", self._check_windows_events),
                 ("Windows Update", self._check_windows_update),
-                ("Gerar Relatório", self._generate_report),
             ]
             results_frame = self._build_action_screen(
                 body, "computer", definitions, with_progress=True

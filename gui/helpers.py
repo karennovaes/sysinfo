@@ -173,10 +173,35 @@ class SystemInfoBase:
     def _build_screen_shell(
             self, parent: tk.Misc, title_text: str
         ) -> tuple[tk.Frame, tk.Frame]:
-            """Cria o cabeçalho vermelho e a área de conteúdo compartilhada."""
+            """Cria o cabeçalho azul e a área de conteúdo compartilhada.
+
+            O cabeçalho tem o título à esquerda e, quando a tela é a de
+            Computador, o botão "Gerar Relatório" alinhado à direita.
+            """
             header = tk.Frame(parent, bg=PRIMARY_COLOR, height=HEADER_HEIGHT)
             header.pack(fill="x")
             header.pack_propagate(False)
+
+            # Botão do relatório à direita (criado antes do título para que o
+            # pack reserve o espaço à direita e o título ocupe o restante).
+            if title_text.startswith("Computador"):
+                self._report_button = tk.Button(
+                    header,
+                    text="Gerar Relatório",
+                    command=self._generate_report,
+                    bg=BG_WHITE,
+                    fg=PRIMARY_COLOR,
+                    activebackground=BG_LIGHT,
+                    activeforeground=PRIMARY_COLOR,
+                    font=FONT_STATUS,
+                    relief="flat",
+                    borderwidth=0,
+                    padx=14,
+                    pady=4,
+                    cursor="hand2",
+                )
+                self._report_button.pack(side="right", padx=(0, 16))
+
             tk.Label(
                 header,
                 text=title_text,
@@ -185,7 +210,7 @@ class SystemInfoBase:
                 anchor="w",
                 font=FONT_TITLE,
                 padx=20,
-            ).pack(fill="both", expand=True)
+            ).pack(side="left", fill="both", expand=True)
             body = tk.Frame(parent, bg=BG_WHITE)
             body.pack(fill="both", expand=True)
             return header, body
