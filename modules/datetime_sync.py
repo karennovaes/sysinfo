@@ -16,12 +16,13 @@ try:
 except ImportError:  # pragma: no cover - usado quando a dependência ainda não foi instalada
     get_localzone_name = None
 
-NTP_SERVER = "time.windows.com"
-SYNC_COMMAND = "w32tm /resync"
+NTP_SERVER = "a.st1.ntp.br"
+NTP_SERVER_FALLBACK = "time.windows.com"
+SYNC_COMMAND = "w32tm /resync /rediscover"
 ENABLE_COMMAND = (
     'sc config w32time start= auto && net start w32time && '
     'w32tm /config /syncfromflags:manual '
-    '/manualpeerlist:"time.windows.com,0x9" /update'
+    '/manualpeerlist:"a.st1.ntp.br,0x9 time.windows.com,0x9" /update'
 )
 
 RunCommand = Callable[..., subprocess.CompletedProcess[str]]
@@ -174,14 +175,113 @@ def check_automatic_sync(
     }
 
 
+def _run_hidden(command: list[str], timeout: int = 30) -> subprocess.CompletedProcess[str] | None:
+    """Executa um comando oculto e devolve o resultado, ou None em falha."""
+    try:
+        return subprocess.run(
+            command,
+            capture_output=True,
+            text=True,
+            timeout=timeout,
+            check=False,
+            creationflags=_creation_flags(),
+            startupinfo=_startup_info(),
+        )
+    except (OSError, subprocess.SubprocessError):
+        return None
+
+
+def _enable_automatic_time() -> tuple[bool, str]:
+    """Ativa 'Definir hora automaticamente' e 'Definir fuso horário automaticamente'."""
+    if platform.system() != "Windows":
+        return False, "não aplicável (disponível apenas no Windows)"
+
+    # Registro: ativa sincronização automática de hora e de fuso horário.
+    # Type=NTP  -> "Definir hora automaticamente"
+    # RealTimeIsUniversal / TimeZoneKeyName -> fuso automático
+    commands = [
+        [
+            "reg", "add",
+            r"HKLM\SYSTEM\CurrentControlSet\Services\W32Time\Parameters",
+            "/v", "Type", "/t", "REG_SZ", "/d", "NTP", "/f",
+        ],
+        [
+            "reg", "add",
+            r"HKLM\SYSTEM\CurrentControlSet\Services\W32Time\Parameters",
+            "/v", "NtpServer", "/t", "REG_SZ",
+            "/d", f"{NTP_SERVER},0x9 {NTP_SERVER_FALLBACK},0x9", "/f",
+        ],
+        [
+            "reg", "add",
+            r"HKLM\SYSTEM\CurrentControlSet\Services\W32Time\TimeProviders\NtpClient",
+            "/v", "Enabled", "/t", "REG_DWORD", "/d", "1", "/f",
+        ],
+        [
+            "reg", "add",
+            r"HKLM\SYSTEM\CurrentControlSet\Services\W32Time\TimeProviders\NtpClient",
+            "/v", "SpecialPollInterval", "/t", "REG_DWORD", "/d", "3600", "/f",
+        ],
+    ]
+
+    failures: list[str] = []
+    for command in commands:
+        result = _run_hidden(command, timeout=15)
+        if result is None or result.returncode != 0:
+            failures.append(" ".join(command[:4]))
+
+    # Ativa o fuso horário automático via PowerShell (Set-TimeZone com -Auto)
+    tz_result = _run_hidden(
+        [
+            "powershell", "-NoProfile", "-NonInteractive", "-Command",
+            "Set-Service -Name tzautoupdate -StartupType Automatic -ErrorAction SilentlyContinue; "
+            "Start-Service -Name tzautoupdate -ErrorAction SilentlyContinue; "
+            "Set-ItemProperty -Path 'HKLM:\SYSTEM\CurrentControlSet\Services\tzautoupdate' "
+            "-Name Start -Value 2 -ErrorAction SilentlyContinue",
+        ],
+        timeout=30,
+    )
+    if tz_result is None or tz_result.returncode != 0:
+        failures.append("tzautoupdate")
+
+    if failures:
+        return False, "falha ao configurar: " + ", ".join(failures)
+    return True, "hora e fuso automáticos ativados"
+
+
+def _set_ntp_server() -> tuple[bool, str]:
+    """Troca o servidor de horário para o NTP.br com fallback da Microsoft."""
+    if platform.system() != "Windows":
+        return False, "não aplicável (disponível apenas no Windows)"
+
+    peers = f"{NTP_SERVER},0x9 {NTP_SERVER_FALLBACK},0x9"
+    result = _run_hidden(
+        [
+            "w32tm", "/config",
+            "/syncfromflags:manual",
+            f"/manualpeerlist:{peers}",
+            "/reliable:yes",
+            "/update",
+        ],
+        timeout=30,
+    )
+    if result is None:
+        return False, "não foi possível executar w32tm /config"
+    output = _completed_output(result)
+    if result.returncode != 0:
+        return False, output or f"w32tm /config terminou com código {result.returncode}"
+    return True, f"servidor definido: {NTP_SERVER} (fallback {NTP_SERVER_FALLBACK})"
+
+
 def synchronize_ntp(
     run_command: RunCommand = subprocess.run,
 ) -> dict[str, str | bool]:
-    """Garante que o Windows Time esteja ativo antes de solicitar a sincronização.
+    """Executa a configuração completa de data/hora e sincroniza o relógio.
 
-    O serviço ``w32time`` pode estar parado mesmo quando o Windows está
-    configurado para sincronização automática. Nesse caso, ``w32tm /resync``
-    falha; por isso o serviço é consultado e iniciado antes do resync.
+    Etapas:
+    1. Ativa "Definir hora automaticamente" (serviço w32time + registro)
+    2. Ativa "Definir fuso horário automaticamente" (serviço tzautoupdate)
+    3. Troca o servidor de horário para a.st1.ntp.br (fallback time.windows.com)
+    4. Sincroniza com rediscovery (w32tm /resync /rediscover)
     """
     if platform.system() != "Windows":
         return {
@@ -189,122 +289,108 @@ def synchronize_ntp(
             "success": False,
             "message": "sincronização NTP disponível apenas no Windows",
             "server": NTP_SERVER,
+            "steps": [],
         }
 
-    try:
-        service = run_command(
-            ["sc", "query", "w32time"],
-            capture_output=True,
-            text=True,
-            timeout=10,
-            check=False,
-            creationflags=_creation_flags(),
-            startupinfo=_startup_info(),
+    steps: list[tuple[str, bool, str]] = []
+
+    # --- Etapa 1: serviço Windows Time ativo e automático ---
+    service = _run_hidden(["sc", "config", "w32time", "start=", "auto"], timeout=15)
+    service_ok = service is not None and service.returncode == 0
+    steps.append(("Serviço Windows Time em automático", service_ok,
+                  _completed_output(service) if service else "falha ao executar sc config"))
+
+    start = _run_hidden(["net", "start", "w32time"], timeout=30)
+    start_ok = start is not None and start.returncode == 0
+    # Código 2 costuma significar "já está em execução" — tratamos como sucesso.
+    if start is not None and start.returncode == 2:
+        start_ok = True
+    steps.append(("Serviço Windows Time iniciado", start_ok,
+                  _completed_output(start) if start else "falha ao executar net start"))
+
+    # --- Etapa 2: hora e fuso automáticos ---
+    auto_ok, auto_msg = _enable_automatic_time()
+    steps.append(("Hora e fuso horário automáticos", auto_ok, auto_msg))
+
+    # --- Etapa 3: troca do servidor de horário ---
+    server_ok, server_msg = _set_ntp_server()
+    steps.append(("Servidor de horário atualizado", server_ok, server_msg))
+
+    # --- Etapa 4: sincronização com rediscovery ---
+    resync = _run_hidden(["w32tm", "/resync", "/rediscover"], timeout=30)
+    resync_output = _completed_output(resync) if resync else "falha ao executar w32tm /resync"
+    resync_ok = resync is not None and resync.returncode == 0
+    steps.append(("Sincronização com rediscovery", resync_ok, resync_output))
+
+    # Se o resync falhou, tenta uma vez sem rediscover (compatibilidade)
+    if not resync_ok:
+        retry = _run_hidden(["w32tm", "/resync"], timeout=30)
+        if retry is not None and retry.returncode == 0:
+            resync_ok = True
+            steps[-1] = ("Sincronização (fallback sem rediscover)", True,
+                         _completed_output(retry))
+
+    success = all(ok for _, ok, _ in steps)
+    if success:
+        message = "data/hora e fuso configurados e sincronizados com sucesso"
+    else:
+        failed = [name for name, ok, _ in steps if not ok]
+        message = (
+            "algumas etapas falharam: " + ", ".join(failed) +
+            ". Execute o programa como Administrador."
         )
-    except (OSError, subprocess.SubprocessError) as exc:
-        return {
-            "available": True,
-            "success": False,
-            "message": f"não foi possível verificar o serviço Windows Time: {exc}",
-            "server": NTP_SERVER,
-        }
 
-    service_output = _completed_output(service).upper()
-    service_running = service.returncode == 0 and "RUNNING" in service_output
-
-    if not service_running:
-        try:
-            start_result = run_command(
-                ["net", "start", "w32time"],
-                capture_output=True,
-                text=True,
-                timeout=30,
-                check=False,
-                creationflags=_creation_flags(),
-                startupinfo=_startup_info(),
-            )
-        except (OSError, subprocess.SubprocessError):
-            start_result = None
-
-        if start_result is None or start_result.returncode != 0:
-            return {
-                "available": True,
-                "success": False,
-                "message": (
-                    "Não foi possível iniciar o serviço Windows Time. "
-                    "Execute o programa como Administrador "
-                    "(clique direito > Executar como administrador)."
-                ),
-                "server": NTP_SERVER,
-            }
-
-    try:
-        result = run_command(
-            ["w32tm", "/resync"],
-            capture_output=True,
-            text=True,
-            timeout=30,
-            check=False,
-            creationflags=_creation_flags(),
-            startupinfo=_startup_info(),
-        )
-    except (OSError, subprocess.SubprocessError) as exc:
-        return {
-            "available": True,
-            "success": False,
-            "message": f"não foi possível executar {SYNC_COMMAND}: {exc}",
-            "server": NTP_SERVER,
-        }
-
-    output = _completed_output(result)
-    if result.returncode == 0:
-        message = output or "sincronização solicitada com sucesso"
-        return {
-            "available": True,
-            "success": True,
-            "message": message,
-            "server": NTP_SERVER,
-        }
-
-    message = output or f"o comando terminou com código {result.returncode}"
     return {
         "available": True,
-        "success": False,
-        "message": (
-            "Falha ao sincronizar. Execute o programa como Administrador "
-            "para sincronizar o relógio. "
-            f"Detalhes: {message}"
-        ),
+        "success": success,
+        "message": message,
         "server": NTP_SERVER,
+        "steps": steps,
     }
 
 
 def display_datetime_sync() -> None:
-    """Exibe um resumo compacto de data/hora e sincronização."""
+    """Configura hora/fuso automáticos, troca o servidor e sincroniza."""
     info = collect_datetime_info()
     result = synchronize_ntp()
-    if result["success"]:
-        log_audit("ntp_sync", "Sincronização NTP concluída com sucesso")
-    else:
-        log_audit("ntp_sync", f"Falha na sincronização NTP: {result['message']}")
-    automatic = check_automatic_sync()
 
-    # A coleta inclui segundos para uso interno; o chat precisa somente de
-    # hora e minuto.
+    if result["success"]:
+        log_audit("ntp_sync", "Configuração e sincronização de data/hora concluídas")
+    else:
+        log_audit("ntp_sync", f"Falha na configuração de data/hora: {result['message']}")
+
     current_time = str(info["time"]).split(":")
     time_label = ":".join(current_time[:2])
     print(
         f"Data/Hora: {info['date']} {time_label} "
         f"({info['timezone']}, {info['utc_offset']})"
     )
+    print("")
+
+    steps = result.get("steps") or []
+    if steps:
+        print("ETAPAS DE CONFIGURAÇÃO")
+        for name, ok, detail in steps:
+            marker = "OK  " if ok else "FALHA"
+            print(f"  [{marker}] {name}")
+            if detail:
+                for line in str(detail).splitlines():
+                    if line.strip():
+                        print(f"           {line.strip()}")
+        print("")
+
     if result["success"]:
-        print("NTP: sincronizado com sucesso")
+        print("Resultado: data/hora e fuso configurados e sincronizados")
     else:
-        print("NTP: falha ao sincronizar (execute como admin)")
+        print(f"Resultado: {result['message']}")
+    print(f"Servidor NTP: {result['server']}")
+
+    automatic = check_automatic_sync()
     print(
         "Sincronização automática: "
         + ("ativada" if automatic["enabled"] else "desativada")
     )
+
     expired = check_expired_certificates()
     if expired > 0:
         print(f"Certificados SSL: {expired} expirado(s) — AVISO: renovar certificados")
