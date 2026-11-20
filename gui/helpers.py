@@ -161,6 +161,7 @@ class SystemInfoBase:
         self._busy = False
         self._command_busy = False
         self._stop_event = threading.Event()
+        self._stop_buttons: dict[str, ttk.Button] = {}
         self._card_queue: queue.Queue = queue.Queue()
         self._card_busy = False
         self._active_screen = ""
@@ -322,12 +323,12 @@ class SystemInfoBase:
                 clear_button.pack(side="left", fill="x", expand=True, padx=(0, 3))
                 self._buttons[screen].append(clear_button)
                 self._button_labels[clear_button] = "Limpar"
-                # Botão Parar: só aparece durante execução
-                self._stop_button = self._make_button(
+                # Botão Parar: só aparece durante execução.
+                # Um por tela, guardado num dict.
+                stop_btn = self._make_button(
                     footer, "Parar", self._stop_operation
                 )
-                # Não adiciona à lista de botões nem ao _button_labels
-                # para não ser desabilitado junto com os demais
+                self._stop_buttons[screen] = stop_btn
             back_button = self._make_button(footer, "Voltar", self._back_to_initial)
             back_button.pack(
                 side="left" if with_progress else "top", fill="x", expand=with_progress
@@ -549,9 +550,10 @@ class SystemInfoBase:
                 button.configure(state="disabled")
                 if self._button_labels[button] == label:
                     button.configure(text="Executando...")
-            # Mostra o botão Parar durante a execução
-            if hasattr(self, "_stop_button") and self._stop_button is not None:
-                self._stop_button.pack(side="left", fill="x", expand=True, padx=(3, 0))
+            # Mostra o botão Parar da tela atual
+            stop_btn = self._stop_buttons.get(screen)
+            if stop_btn is not None:
+                stop_btn.pack(side="left", fill="x", expand=True, padx=(3, 0))
 
     def _set_tool_ready(self) -> None:
             screen = self._active_screen
@@ -561,9 +563,9 @@ class SystemInfoBase:
             self._statuses[screen].configure(text="Status: Pronto", fg=ACCENT_GREEN)
             for button in self._buttons[screen]:
                 button.configure(state="normal", text=self._button_labels[button])
-            # Restaura o botão Parar se existir
-            if hasattr(self, "_stop_button") and self._stop_button is not None:
-                self._stop_button.pack_forget()
+            stop_btn = self._stop_buttons.get(screen)
+            if stop_btn is not None:
+                stop_btn.pack_forget()
 
     def _stop_operation(self) -> None:
             """Interrompe a operação em andamento e libera os botões."""
@@ -574,8 +576,9 @@ class SystemInfoBase:
             self._statuses[screen].configure(text="Status: Interrompido", fg=ACCENT_RED)
             for button in self._buttons[screen]:
                 button.configure(state="normal", text=self._button_labels[button])
-            if hasattr(self, "_stop_button") and self._stop_button is not None:
-                self._stop_button.pack_forget()
+            stop_btn = self._stop_buttons.get(screen)
+            if stop_btn is not None:
+                stop_btn.pack_forget()
             self._append_output(screen, "\nOperação interrompida pelo usuário.\n")
             # Esvazia as filas para não processar resultados antigos
             try:
@@ -760,8 +763,9 @@ class SystemInfoBase:
                 button.configure(state="disabled")
                 if self._button_labels[button] == label:
                     button.configure(text="Executando...")
-            if hasattr(self, "_stop_button") and self._stop_button is not None:
-                self._stop_button.pack(side="left", fill="x", expand=True, padx=(3, 0))
+            stop_btn = self._stop_buttons.get(screen)
+            if stop_btn is not None:
+                stop_btn.pack(side="left", fill="x", expand=True, padx=(3, 0))
             self._append_output(screen, f"{label}\n")
 
     def _set_command_ready(self) -> None:
