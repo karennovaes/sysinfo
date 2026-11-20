@@ -15,7 +15,7 @@ except ImportError:
 from modules.config import PRINTERS_COMMAND
 from modules.security import log_audit
 from modules.theme import *
-from .helpers import (
+from gui.helpers import (
     SystemInfoBase, _clear_print_queue, _creation_flags, _run_command_capture, _startup_info,
 )
 from modules.datetime_sync import display_datetime_sync
