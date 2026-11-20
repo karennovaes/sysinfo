@@ -126,6 +126,15 @@ def _clean_directory(
     return stats
 
 
+def _contains_preserved(path: str, preserved_names: set[str]) -> bool:
+    """Retorna True se ``path`` contém (em qualquer profundidade) uma subpasta preservada."""
+    preserved_lower = {name.casefold() for name in preserved_names}
+    for root, dirnames, _ in os.walk(path, topdown=True):
+        for name in dirnames:
+            if name.casefold() in preserved_lower:
+                return True
+    return False
+
 def _clean_directory_preserving(
     path: str,
     preserved_names: set[str],
@@ -195,6 +204,10 @@ def _clean_directory_preserving(
             continue
         # Segurança extra: nunca remover uma pasta preservada.
         if os.path.basename(directory).casefold() in preserved_lower:
+            continue
+        # Segurança: nunca remover uma pasta que CONTÉM uma subpasta preservada.
+        # shutil.rmtree seria recursivo e apagaria tudo dentro, incluindo logs.
+        if _contains_preserved(directory, preserved_names):
             continue
         try:
             shutil.rmtree(directory)
