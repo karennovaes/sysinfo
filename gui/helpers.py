@@ -665,8 +665,11 @@ class SystemInfoBase:
                     self._hide_progress()
                 self._set_tool_ready()
                 return
-            if self._busy:
+            if self._busy and not self._stop_event.is_set():
                 self.root.after(50, self._process_queue)
+            elif self._busy and self._stop_event.is_set():
+                # O stop já liberou os botões; apenas não reagenda.
+                pass
 
     def _show_cards_async(
             self,
@@ -787,7 +790,10 @@ class SystemInfoBase:
             except Exception as exc:  # pragma: no cover - proteção da thread
                 self._command_result_queue.put(("output", f"Erro: {exc}\n"))
             finally:
-                self._command_result_queue.put(("done", None))
+                if not self._stop_event.is_set():
+                    self._command_result_queue.put(("done", None))
+                else:
+                    self._command_result_queue.put(("done", None))
 
     def _queue_command_output(self, text: str) -> None:
             self._command_result_queue.put(("output", f"{text}\n"))
@@ -846,8 +852,10 @@ class SystemInfoBase:
                     finished = True
             if finished:
                 self._set_command_ready()
-            elif self._command_busy:
+            elif self._command_busy and not self._stop_event.is_set():
                 self.root.after(50, self._process_command_queue)
+            elif self._command_busy and self._stop_event.is_set():
+                pass
 
     def _queue_command_output_capture(self, action: Action) -> None:
             """Captura funções de diagnóstico que imprimem na saída padrão."""

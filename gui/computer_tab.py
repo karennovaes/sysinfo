@@ -53,7 +53,7 @@ class ComputerTabMixin:
                         f"Limpando... {count} arquivos, {mb:.1f} MB",
                     ))
 
-                display_temp_cleaner(_on_progress)
+                display_temp_cleaner(_on_progress, self._stop_event.is_set)
 
             self._start_operation("Limpeza de Cache", [("LIMPEZA DE CACHE", _run_clean)])
 
