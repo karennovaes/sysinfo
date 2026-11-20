@@ -1,4 +1,4 @@
 psutil
-speedtest-cli
 pyinstaller
 tzlocal
+
