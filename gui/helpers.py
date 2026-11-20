@@ -163,6 +163,7 @@ class SystemInfoBase:
         self._stop_event = threading.Event()
         self._operation_gen = 0
         self._current_gen = 0
+        self._stdout_lock = threading.Lock()
         self._stop_buttons: dict[str, object] = {}
         self._card_queue: queue.Queue = queue.Queue()
         self._card_busy = False
@@ -658,11 +659,12 @@ class SystemInfoBase:
                     break
                 self._result_queue.put(("progress", title, gen))
                 captured = StringIO()
-                with redirect_stdout(captured):
-                    try:
-                        action()
-                    except Exception as exc:  # pragma: no cover - proteção da thread
-                        print(f"Não foi possível concluir esta seção: {exc}")
+                with self._stdout_lock:
+                    with redirect_stdout(captured):
+                        try:
+                            action()
+                        except Exception as exc:  # pragma: no cover - proteção da thread
+                            print(f"Não foi possível concluir esta seção: {exc}")
                 if not self._stop_event.is_set() and gen == self._operation_gen:
                     self._result_queue.put(
                         (
@@ -937,8 +939,9 @@ class SystemInfoBase:
             if gen is None:
                 gen = getattr(self, "_current_gen", None)
             captured = StringIO()
-            with redirect_stdout(captured):
-                action()
+            with self._stdout_lock:
+                with redirect_stdout(captured):
+                    action()
             self._queue_command_output(captured.getvalue(), gen)
 
     def _generate_report(self) -> None:
