@@ -33,7 +33,23 @@ class SystemInfoApp(
         self.root.geometry("700x500")
         self.root.minsize(500, 400)
         self.root.resizable(True, True)
-        self.root.configure(bg=BG_WHITE)
+        self.root.configure(bg=BG_LIGHT)
+        # Resolve a fonte antes de montar a interface: usa Roboto quando
+        # instalada e cai para Segoe UI caso contrário.
+        from gui.styles import resolve_font_family
+
+        family = resolve_font_family(self.root)
+        if family != FONT_FAMILY:
+            import modules.theme as theme_module
+
+            theme_module.FONT_TITLE = (family, 15, "bold")
+            theme_module.FONT_HEADING = (family, 17, "bold")
+            theme_module.FONT_SUBHEADING = (family, 12, "bold")
+            theme_module.FONT_BUTTON = (family, 10)
+            theme_module.FONT_BUTTON_BOLD = (family, 10, "bold")
+            theme_module.FONT_CARD = (family, 11, "bold")
+            theme_module.FONT_BODY = (family, 10)
+            theme_module.FONT_STATUS = (family, 9, "bold")
         setup_styles(ttk.Style(self.root))
         super().__init__(root)
         self._build_ui()
@@ -56,7 +72,7 @@ class SystemInfoApp(
             _, body = self._build_screen_shell(self.initial_frame, WINDOW_TITLE)
             content = tk.Frame(
                 body,
-                bg=BG_WHITE,
+                bg=BG_LIGHT,
                 padx=PADDING_CONTENT[0],
                 pady=PADDING_CONTENT[1],
             )
@@ -64,21 +80,84 @@ class SystemInfoApp(
             tk.Label(
                 content,
                 text="Selecione uma categoria",
-                bg=BG_WHITE,
+                bg=BG_LIGHT,
                 fg=TEXT_DARK,
                 font=FONT_HEADING,
             ).pack(pady=(0, 24))
             definitions = [
-                ("💻  Computador", lambda: self._show_frame(self.computer_frame)),
-                ("🧩  Programa", lambda: self._show_frame(self.program_frame)),
-                ("🌐  Rede", lambda: self._show_frame(self.network_frame)),
-                ("🖨️  Impressora", lambda: self._show_frame(self.printer_frame)),
+                ("💻", "Computador", lambda: self._show_frame(self.computer_frame)),
+                ("🧩", "Programa", lambda: self._show_frame(self.program_frame)),
+                ("🌐", "Rede", lambda: self._show_frame(self.network_frame)),
+                ("🖨️", "Impressora", lambda: self._show_frame(self.printer_frame)),
             ]
-            for label, action in definitions:
+            for icon, label, action in definitions:
                 shadow = tk.Frame(content, bg=SHADOW_COLOR)
                 shadow.pack(fill="x", pady=6)
-                button = self._make_button(shadow, label, action, style_name="Card.TButton")
-                button.pack(fill="x", padx=PADX_BUTTONS, pady=(0, PADY_BUTTONS))
+                # O card é um Frame com ícone e texto em colunas separadas.
+                # Isso garante alinhamento vertical consistente entre o emoji
+                # e a palavra, independente da fonte usada.
+                card = tk.Frame(
+                    shadow,
+                    bg=BG_CARD,
+                    highlightbackground=BORDER_COLOR,
+                    highlightthickness=1,
+                    cursor="hand2",
+                )
+                card.pack(fill="x", padx=PADX_BUTTONS, pady=(0, PADY_BUTTONS))
+
+                # Grupo ícone+texto centralizado horizontalmente no card.
+                # Usamos grid com uma única linha e âncora "center" nos dois
+                # widgets: assim o emoji e a palavra compartilham exatamente o
+                # mesmo centro vertical, independente da altura da linha.
+                group = tk.Frame(card, bg=BG_CARD)
+                group.pack(expand=True, pady=14)
+
+                # "Segoe UI Emoji" é a fonte que desenha os emojis no Windows
+                # com métricas consistentes; sem ela o glifo herda a fonte do
+                # texto e fica deslocado verticalmente.
+                icon_label = tk.Label(
+                    group,
+                    text=icon,
+                    bg=BG_CARD,
+                    fg=TEXT_DARK,
+                    font=("Segoe UI Emoji", 13),
+                )
+                icon_label.grid(row=0, column=0, padx=(0, 10), sticky="")
+
+                text_label = tk.Label(
+                    group,
+                    text=label,
+                    bg=BG_CARD,
+                    fg=TEXT_DARK,
+                    font=FONT_CARD,
+                )
+                text_label.grid(row=0, column=1, sticky="")
+
+                # Centraliza o conteúdo do grupo dentro do card.
+                group.grid_columnconfigure(0, weight=0)
+                group.grid_columnconfigure(1, weight=0)
+
+                # Clique em qualquer parte do card dispara a ação.
+                for widget in (card, group, icon_label, text_label):
+                    widget.bind("<Button-1>", lambda _event, cb=action: cb())
+                    widget.bind(
+                        "<Enter>",
+                        lambda _event, c=card, g=group, i=icon_label, t=text_label: (
+                            c.configure(bg=PRIMARY_LIGHT, highlightbackground=PRIMARY_COLOR),
+                            g.configure(bg=PRIMARY_LIGHT),
+                            i.configure(bg=PRIMARY_LIGHT),
+                            t.configure(bg=PRIMARY_LIGHT, fg=PRIMARY_DARK),
+                        ),
+                    )
+                    widget.bind(
+                        "<Leave>",
+                        lambda _event, c=card, g=group, i=icon_label, t=text_label: (
+                            c.configure(bg=BG_CARD, highlightbackground=BORDER_COLOR),
+                            g.configure(bg=BG_CARD),
+                            i.configure(bg=BG_CARD),
+                            t.configure(bg=BG_CARD, fg=TEXT_DARK),
+                        ),
+                    )
 _ICON_B64 = (
     """AAABAAQAEBAAAAAAIAClAgAARgAAACAgAAAAACAAbwYAAOsCAAAwMAAAAAAgAG0LAABaCQAAAAAA
 AAAAIADjqAAAxxQAAIlQTkcNChoKAAAADUlIRFIAAAAQAAAAEAgGAAAAH/P/YQAAAmxJREFUeJxt
