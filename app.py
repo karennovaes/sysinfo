@@ -5,7 +5,10 @@ from gui.helpers import _ensure_admin
 
 
 def main() -> None:
-    _ensure_admin() 
+    # Solicita elevação ANTES de criar a janela. Sem isso, comandos que
+    # exigem administrador (w32tm, sc config, reg add) falham com acesso negado.
+    _ensure_admin()
+
     import tkinter as tk
 
     root = tk.Tk()

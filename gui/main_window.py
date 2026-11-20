@@ -15,12 +15,13 @@ except ImportError:
     ttk = None
 
 from modules.theme import *
-from .computer_tab import ComputerTabMixin
-from .helpers import SystemInfoBase, _ensure_admin
-from .network_tab import NetworkTabMixin
-from .printer_tab import PrinterTabMixin
-from .program_tab import ProgramTabMixin
-from .styles import setup_styles
+from gui.computer_tab import ComputerTabMixin
+from gui.helpers import SystemInfoBase, _ensure_admin
+from gui.network_tab import NetworkTabMixin
+from gui.printer_tab import PrinterTabMixin
+from gui.program_tab import ProgramTabMixin
+from gui.styles import setup_styles
+
 
 class SystemInfoApp(
     ComputerTabMixin, ProgramTabMixin, NetworkTabMixin, PrinterTabMixin, SystemInfoBase

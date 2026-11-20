@@ -114,7 +114,7 @@ def _rule_antivirus(lines: list[str]) -> str | None:
     joined = " ".join(lines).casefold()
     if "desativad" in joined or "desligad" in joined:
         return "Antivírus desativado — recomenda-se manter a proteção ativa."
-    if "ativad" in joined or "protegid" in joined:
+    if "ativad" in joined or "protegid" in joined or "ativo" in joined or "protege" in joined:
         return "Antivírus ativo e protegendo o computador."
     return None
 

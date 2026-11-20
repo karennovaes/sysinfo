@@ -80,13 +80,25 @@ def _run_command_capture(command: list[str]) -> str:
         result = subprocess.run(
             command,
             capture_output=True,
-            text=True,
             timeout=30,
             check=False,
             creationflags=_creation_flags(),
             startupinfo=_startup_info(),
         )
-        output = (result.stdout or "") + (result.stderr or "")
+        # O Windows em PT-BR usa codepage 850 (DOS) ou 1252 (ANSI) para a
+        # saída de comandos como ipconfig e netsh. Decodificamos com fallback.
+        raw = (result.stdout or b"") + (result.stderr or b"")
+        for encoding in ("cp850", "cp1252", "utf-8", "latin-1"):
+            try:
+                output = raw.decode(encoding)
+                # Heuristica: se decodificou sem erro e tem caracteres
+                # acentuados validos, usa essa codificacao.
+                if "ã" in output or "ç" in output or "ê" in output or "á" in output:
+                    break
+            except (UnicodeDecodeError, LookupError):
+                continue
+        else:
+            output = raw.decode("utf-8", errors="replace")
         return output.strip() or "Comando executado sem saída."
     except Exception as exc:
         return f"Erro ao executar: {exc}"
@@ -107,7 +119,6 @@ def _clear_print_queue() -> str:
                 result = subprocess.run(
                     cmd,
                     capture_output=True,
-                    text=True,
                     timeout=15,
                     check=False,
                     creationflags=_creation_flags(),
@@ -117,14 +128,26 @@ def _clear_print_queue() -> str:
                 result = subprocess.run(
                     command,
                     capture_output=True,
-                    text=True,
                     timeout=15,
                     check=False,
                     creationflags=_creation_flags(),
                     startupinfo=_startup_info(),
                 )
             output_lines.append(f"> {' '.join(command)}")
-            output_lines.append((result.stdout or result.stderr or "OK").strip())
+            raw = result.stdout or result.stderr or b"OK"
+            if isinstance(raw, bytes):
+                for enc in ("cp850", "cp1252", "utf-8", "latin-1"):
+                    try:
+                        decoded = raw.decode(enc)
+                        if any(c in decoded for c in "ãçêáéíóúâô"):
+                            break
+                    except (UnicodeDecodeError, LookupError):
+                        continue
+                else:
+                    decoded = raw.decode("utf-8", errors="replace")
+            else:
+                decoded = str(raw)
+            output_lines.append(decoded.strip())
         except Exception as exc:
             output_lines.append(f"> {' '.join(command)}")
             output_lines.append(f"Erro ao executar: {exc}")
@@ -160,6 +183,11 @@ class SystemInfoBase:
         self._scan_busy = False
         self._busy = False
         self._command_busy = False
+        self._stop_event = threading.Event()
+        self._operation_gen = 0
+        self._current_gen = 0
+        self._stdout_lock = threading.Lock()
+        self._stop_buttons: dict[str, object] = {}
         self._card_queue: queue.Queue = queue.Queue()
         self._card_busy = False
         self._active_screen = ""
@@ -183,8 +211,7 @@ class SystemInfoBase:
             header.pack(fill="x")
             header.pack_propagate(False)
 
-            # Botão do relatório à direita (criado antes do título para que o
-            # pack reserve o espaço à direita e o título ocupe o restante).
+            # Botão do relatório à direita (tela inicial apenas).
             if title_text == WINDOW_TITLE:
                 self._report_button = tk.Button(
                     header,
@@ -202,6 +229,36 @@ class SystemInfoBase:
                     cursor="hand2",
                 )
                 self._report_button.pack(side="right", padx=(0, 18))
+
+            # Botão Parar à direita (todas as telas exceto a inicial).
+            # Começa oculto; só aparece quando um diagnóstico está rodando.
+            if title_text != WINDOW_TITLE:
+                # Deriva a chave da tela a partir do título.
+                _title_to_screen = {
+                    "computador": "computer",
+                    "programa": "program",
+                    "rede": "network",
+                    "impressora": "printer",
+                }
+                screen_key = _title_to_screen.get(
+                    title_text.split(" ")[0].casefold(), ""
+                )
+                stop_btn = tk.Button(
+                    header,
+                    text="Parar",
+                    command=self._stop_operation,
+                    bg=BG_WHITE,
+                    fg=ACCENT_RED,
+                    activebackground=PRIMARY_LIGHT,
+                    activeforeground=ACCENT_RED,
+                    font=FONT_BUTTON_BOLD,
+                    relief="flat",
+                    borderwidth=0,
+                    padx=16,
+                    pady=6,
+                    cursor="hand2",
+                )
+                self._stop_buttons[screen_key] = stop_btn
 
             tk.Label(
                 header,
@@ -535,71 +592,141 @@ class SystemInfoBase:
 
     def _set_tool_busy(self, screen: str, label: str) -> None:
             self._busy = True
+            self._stop_event.clear()
             self._active_screen = screen
             self._statuses[screen].configure(text="Status: Executando...", fg=ACCENT_YELLOW)
             for button in self._buttons[screen]:
                 button.configure(state="disabled")
                 if self._button_labels[button] == label:
                     button.configure(text="Executando...")
+            # Mostra o botão Parar da tela atual
+            stop_btn = self._stop_buttons.get(screen)
+            if stop_btn is not None:
+                stop_btn.pack(side="right", padx=(0, 18))
 
     def _set_tool_ready(self) -> None:
             screen = self._active_screen
             self._busy = False
+            self._command_busy = False
+            self._stop_event.clear()
             self._statuses[screen].configure(text="Status: Pronto", fg=ACCENT_GREEN)
             for button in self._buttons[screen]:
                 button.configure(state="normal", text=self._button_labels[button])
+            stop_btn = self._stop_buttons.get(screen)
+            if stop_btn is not None:
+                stop_btn.pack_forget()
+
+    def _stop_operation(self) -> None:
+            """Interrompe a operação em andamento e libera os botões."""
+            self._stop_event.set()
+            screen = self._active_screen
+            self._busy = False
+            self._command_busy = False
+            self._statuses[screen].configure(text="Status: Interrompido", fg=ACCENT_RED)
+            for button in self._buttons[screen]:
+                button.configure(state="normal", text=self._button_labels[button])
+            stop_btn = self._stop_buttons.get(screen)
+            if stop_btn is not None:
+                stop_btn.pack_forget()
+            self._pending_tool_output = ""
+            self._append_output(screen, "\nOperação interrompida pelo usuário.\n")
+            # Esvazia as filas para não processar resultados antigos
+            try:
+                while True:
+                    self._result_queue.get_nowait()
+            except queue.Empty:
+                pass
+            try:
+                while True:
+                    self._command_result_queue.get_nowait()
+            except queue.Empty:
+                pass
 
     def _start_operation(
             self, label: str, sections: list[Section], screen: str = "computer"
         ) -> None:
             if self._busy or self._command_busy or self._scan_busy:
                 return
+            self._operation_gen += 1
+            gen = self._operation_gen
+            self._stop_event.clear()
+            # Esvazia filas de resultados anteriores para não misturar.
+            try:
+                while True:
+                    self._result_queue.get_nowait()
+            except queue.Empty:
+                pass
+            try:
+                while True:
+                    self._command_result_queue.get_nowait()
+            except queue.Empty:
+                pass
             self._set_tool_busy(screen, label)
+            self._current_gen = gen
             self._pending_tool_output = ""
             if screen == "computer":
                 progress_name = label if len(sections) > 1 else self._progress_name(sections[0][0])
                 self._show_progress(progress_name, len(sections))
             worker = threading.Thread(
                 target=self._run_sections,
-                args=(sections,),
+                args=(sections, gen),
                 daemon=True,
                 name="sysinfo-diagnostics",
             )
             worker.start()
             self.root.after(50, self._process_queue)
 
-    def _run_sections(self, sections: list[Section]) -> None:
+    def _run_sections(self, sections: list[Section], gen: int = 0) -> None:
             for title, action in sections:
-                self._result_queue.put(("progress", title))
+                if self._stop_event.is_set() or gen != self._operation_gen:
+                    break
+                self._result_queue.put(("progress", title, gen))
                 captured = StringIO()
-                with redirect_stdout(captured):
-                    try:
-                        action()
-                    except Exception as exc:  # pragma: no cover - proteção da thread
-                        print(f"Não foi possível concluir esta seção: {exc}")
-                self._result_queue.put(
-                    (
-                        "output",
-                        f"\n{'=' * 59}\n{title}\n{'=' * 59}\n"
-                        f"{captured.getvalue()}\n{'-' * 59}\n",
+                with self._stdout_lock:
+                    with redirect_stdout(captured):
+                        try:
+                            action()
+                        except Exception as exc:  # pragma: no cover - proteção da thread
+                            print(f"Não foi possível concluir esta seção: {exc}")
+                if not self._stop_event.is_set() and gen == self._operation_gen:
+                    self._result_queue.put(
+                        (
+                            "output",
+                            f"\n{'=' * 57}\n{title}\n{'=' * 57}\n"
+                            f"{captured.getvalue()}\n{'-' * 57}\n",
+                            gen,
+                        )
                     )
-                )
-            self._result_queue.put(("done", None))
+            if not self._stop_event.is_set() and gen == self._operation_gen:
+                self._result_queue.put(("done", None, gen))
 
     def _process_queue(self) -> None:
             try:
-                message_type, payload = self._result_queue.get_nowait()
+                msg = self._result_queue.get_nowait()
+                message_type = msg[0] if len(msg) > 0 else None
+                payload = msg[1] if len(msg) > 1 else None
+                msg_gen = msg[2] if len(msg) > 2 else None
             except queue.Empty:
-                message_type, payload = None, None
+                message_type, payload, msg_gen = None, None, None
+            # Descarta mensagens de gerações antigas (teste cancelado)
+            if msg_gen is not None and msg_gen != self._operation_gen:
+                if self._busy and not self._stop_event.is_set():
+                    self.root.after(50, self._process_queue)
+                return
             if message_type == "progress" and payload:
                 if self._active_screen == "computer":
-                    progress_name = self._progress_name(payload)
-                    next_step = min(self._progress_current + 1, self._progress_total)
                     progress_label = self._progress_labels.get(self._active_screen)
                     if progress_label:
-                        progress_label.configure(
-                            text=f"Executando: {progress_name}... ({next_step}/{self._progress_total})"
-                        )
+                        # Mensagens customizadas (ex.: "Limpando... X arquivos")
+                        # são mostradas diretamente, sem o step/total.
+                        if "Limpando" in payload or "..." in payload:
+                            progress_label.configure(text=payload)
+                        else:
+                            progress_name = self._progress_name(payload)
+                            next_step = min(self._progress_current + 1, self._progress_total)
+                            progress_label.configure(
+                                text=f"Executando: {progress_name}... ({next_step}/{self._progress_total})"
+                            )
             elif message_type == "output" and payload:
                 self._pending_tool_output += payload
                 if self._active_screen == "computer":
@@ -618,8 +745,11 @@ class SystemInfoBase:
                     self._hide_progress()
                 self._set_tool_ready()
                 return
-            if self._busy:
+            if self._busy and not self._stop_event.is_set():
                 self.root.after(50, self._process_queue)
+            elif self._busy and self._stop_event.is_set():
+                # O stop já liberou os botões; apenas não reagenda.
+                pass
 
     def _show_cards_async(
             self,
@@ -703,17 +833,32 @@ class SystemInfoBase:
 
     def _set_command_busy(self, screen: str, label: str) -> None:
             self._command_busy = True
+            self._stop_event.clear()
             self._active_screen = screen
             self._statuses[screen].configure(text="Status: Executando...", fg=ACCENT_YELLOW)
             for button in self._buttons[screen]:
                 button.configure(state="disabled")
                 if self._button_labels[button] == label:
                     button.configure(text="Executando...")
-            self._append_output(screen, f"{label}\n")
+            stop_btn = self._stop_buttons.get(screen)
+            if stop_btn is not None:
+                stop_btn.pack(side="right", padx=(0, 18))
+            # Limpa o terminal antes de iniciar um novo comando
+            output = self._outputs[screen]
+            output.configure(state="normal")
+            output.delete("1.0", "end")
+            output.configure(state="disabled")
+            # Cabeçalho no mesmo formato da aba Computador
+            self._append_output(
+                screen,
+                f"\n{'=' * 57}\n{label.upper()}\n{'=' * 57}\n\n",
+            )
 
     def _set_command_ready(self) -> None:
             screen = self._active_screen
             self._command_busy = False
+            self._stop_event.clear()
+            self._append_output(screen, f"\n{'-' * 59}\n")
             self._statuses[screen].configure(text="Status: Pronto", fg=ACCENT_GREEN)
             for button in self._buttons[screen]:
                 button.configure(state="normal", text=self._button_labels[button])
@@ -721,34 +866,56 @@ class SystemInfoBase:
     def _start_command_thread(self, screen: str, label: str, action: Action) -> None:
             if self._busy or self._command_busy or self._scan_busy:
                 return
+            self._operation_gen += 1
+            gen = self._operation_gen
+            self._stop_event.clear()
+            try:
+                while True:
+                    self._result_queue.get_nowait()
+            except queue.Empty:
+                pass
+            try:
+                while True:
+                    self._command_result_queue.get_nowait()
+            except queue.Empty:
+                pass
             self._set_command_busy(screen, label)
+            self._current_gen = gen
             worker = threading.Thread(
                 target=self._run_command_action,
-                args=(action,),
+                args=(action, gen),
                 daemon=True,
                 name="sysinfo-command",
             )
             worker.start()
             self.root.after(50, self._process_command_queue)
 
-    def _run_command_action(self, action: Action) -> None:
+    def _run_command_action(self, action: Action, gen: int = 0) -> None:
             try:
                 action()
             except Exception as exc:  # pragma: no cover - proteção da thread
-                self._command_result_queue.put(("output", f"Erro: {exc}\n"))
+                if not self._stop_event.is_set() and gen == self._operation_gen:
+                    self._command_result_queue.put(("output", f"Erro: {exc}\n", gen))
             finally:
-                self._command_result_queue.put(("done", None))
+                if not self._stop_event.is_set() and gen == self._operation_gen:
+                    self._command_result_queue.put(("done", None, gen))
 
-    def _queue_command_output(self, text: str) -> None:
-            self._command_result_queue.put(("output", f"{text}\n"))
+    def _queue_command_output(self, text: str, gen: int | None = None) -> None:
+            self._command_result_queue.put(("output", f"{text}\n", gen))
 
     def _process_command_queue(self) -> None:
             finished = False
             while True:
                 try:
-                    message_type, payload = self._command_result_queue.get_nowait()
+                    msg = self._command_result_queue.get_nowait()
+                    message_type = msg[0] if len(msg) > 0 else None
+                    payload = msg[1] if len(msg) > 1 else None
+                    msg_gen = msg[2] if len(msg) > 2 else None
                 except queue.Empty:
                     break
+                # Descarta mensagens de gerações antigas
+                if msg_gen is not None and msg_gen != self._operation_gen:
+                    continue
                 if message_type == "output" and payload:
                     self._append_command_output(payload)
                 elif message_type == "progress_start":
@@ -796,15 +963,20 @@ class SystemInfoBase:
                     finished = True
             if finished:
                 self._set_command_ready()
-            elif self._command_busy:
+            elif self._command_busy and not self._stop_event.is_set():
                 self.root.after(50, self._process_command_queue)
+            elif self._command_busy and self._stop_event.is_set():
+                pass
 
-    def _queue_command_output_capture(self, action: Action) -> None:
+    def _queue_command_output_capture(self, action: Action, gen: int | None = None) -> None:
             """Captura funções de diagnóstico que imprimem na saída padrão."""
+            if gen is None:
+                gen = getattr(self, "_current_gen", None)
             captured = StringIO()
-            with redirect_stdout(captured):
-                action()
-            self._queue_command_output(captured.getvalue())
+            with self._stdout_lock:
+                with redirect_stdout(captured):
+                    action()
+            self._queue_command_output(captured.getvalue(), gen)
 
     def _generate_report(self) -> None:
             """Gera o relatório da sessão e copia para a área de transferência."""
@@ -888,7 +1060,7 @@ class SystemInfoBase:
                 log_audit("download_failed", f"Erro: {error}")
                 self._queue_command_output(f"Erro ao baixar: {error}")
                 return
-            self._command_result_queue.put(("progress_start", None))
+            self._command_result_queue.put(("progress_start", None, self._operation_gen))
 
             def reporthook(block_number: int, block_size: int, total_size: int) -> None:
                 downloaded = block_number * block_size
@@ -914,10 +1086,10 @@ class SystemInfoBase:
                 sha256 = calculate_sha256(destination)
             except Exception as error:
                 log_audit("download_failed", f"Erro: {error}")
-                self._command_result_queue.put(("progress_done", None))
+                self._command_result_queue.put(("progress_done", None, self._operation_gen))
                 self._queue_command_output(f"Erro ao baixar: {error}")
                 return
-            self._command_result_queue.put(("progress_done", None))
+            self._command_result_queue.put(("progress_done", None, self._operation_gen))
             log_audit("download_complete", f"Arquivo: {destination}, SHA-256: {sha256}")
             self._queue_command_output(f"Download concluído: {destination}")
             self._queue_command_output(f"SHA-256: {sha256}")

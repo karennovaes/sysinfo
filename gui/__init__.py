@@ -1,5 +1,5 @@
 """Interface gráfica modular do SuporteTools."""
 
-from .main_windows import SystemInfoApp
+from .main_window import SystemInfoApp
 
 __all__ = ["SystemInfoApp"]

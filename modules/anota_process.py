@@ -95,6 +95,7 @@ def _read_version(executable: Path) -> str:
             ],
             capture_output=True,
             text=True,
+            encoding="cp850",
             timeout=15,
             check=False,
             creationflags=_creation_flags(),
@@ -120,6 +121,7 @@ def _read_version(executable: Path) -> str:
             ],
             capture_output=True,
             text=True,
+            encoding="cp850",
             timeout=15,
             check=False,
             creationflags=_creation_flags(),
@@ -273,6 +275,7 @@ def kill_anota_processes() -> int:
                 ["taskkill", "/F", "/IM", name],
                 capture_output=True,
                 text=True,
+            encoding="cp850",
                 timeout=15,
                 check=False,
                 creationflags=_creation_flags(),
@@ -316,6 +319,7 @@ def _shortcut_targets() -> Iterable[Path]:
             ["powershell", "-NoProfile", "-NonInteractive", "-Command", script, *map(str, roots)],
             capture_output=True,
             text=True,
+            encoding="cp850",
             timeout=15,
             check=False,
             creationflags=_creation_flags(),
@@ -382,3 +386,4 @@ def installed_version() -> str:
 
 def display_installed_version() -> None:
     print(installed_version())
+
