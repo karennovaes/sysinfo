@@ -825,11 +825,17 @@ class SystemInfoBase:
             output.configure(state="normal")
             output.delete("1.0", "end")
             output.configure(state="disabled")
-            self._append_output(screen, f"{label}\n")
+            # Cabeçalho no mesmo formato da aba Computador
+            self._append_output(
+                screen,
+                f"\n{'=' * 59}\n{label.upper()}\n{'=' * 59}\n\n",
+            )
 
     def _set_command_ready(self) -> None:
             screen = self._active_screen
             self._command_busy = False
+            self._stop_event.clear()
+            self._append_output(screen, f"\n{'-' * 59}\n")
             self._statuses[screen].configure(text="Status: Pronto", fg=ACCENT_GREEN)
             for button in self._buttons[screen]:
                 button.configure(state="normal", text=self._button_labels[button])
