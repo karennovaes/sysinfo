@@ -160,6 +160,7 @@ class SystemInfoBase:
         self._scan_busy = False
         self._busy = False
         self._command_busy = False
+        self._stop_event = threading.Event()
         self._card_queue: queue.Queue = queue.Queue()
         self._card_busy = False
         self._active_screen = ""
@@ -321,6 +322,12 @@ class SystemInfoBase:
                 clear_button.pack(side="left", fill="x", expand=True, padx=(0, 3))
                 self._buttons[screen].append(clear_button)
                 self._button_labels[clear_button] = "Limpar"
+                # Botão Parar: só aparece durante execução
+                self._stop_button = self._make_button(
+                    footer, "Parar", self._stop_operation
+                )
+                # Não adiciona à lista de botões nem ao _button_labels
+                # para não ser desabilitado junto com os demais
             back_button = self._make_button(footer, "Voltar", self._back_to_initial)
             back_button.pack(
                 side="left" if with_progress else "top", fill="x", expand=with_progress
@@ -535,19 +542,52 @@ class SystemInfoBase:
 
     def _set_tool_busy(self, screen: str, label: str) -> None:
             self._busy = True
+            self._stop_event.clear()
             self._active_screen = screen
             self._statuses[screen].configure(text="Status: Executando...", fg=ACCENT_YELLOW)
             for button in self._buttons[screen]:
                 button.configure(state="disabled")
                 if self._button_labels[button] == label:
                     button.configure(text="Executando...")
+            # Mostra o botão Parar durante a execução
+            if hasattr(self, "_stop_button") and self._stop_button is not None:
+                self._stop_button.pack(side="left", fill="x", expand=True, padx=(3, 0))
 
     def _set_tool_ready(self) -> None:
             screen = self._active_screen
             self._busy = False
+            self._command_busy = False
+            self._stop_event.clear()
             self._statuses[screen].configure(text="Status: Pronto", fg=ACCENT_GREEN)
             for button in self._buttons[screen]:
                 button.configure(state="normal", text=self._button_labels[button])
+            # Restaura o botão Parar se existir
+            if hasattr(self, "_stop_button") and self._stop_button is not None:
+                self._stop_button.pack_forget()
+
+    def _stop_operation(self) -> None:
+            """Interrompe a operação em andamento e libera os botões."""
+            self._stop_event.set()
+            screen = self._active_screen
+            self._busy = False
+            self._command_busy = False
+            self._statuses[screen].configure(text="Status: Interrompido", fg=ACCENT_RED)
+            for button in self._buttons[screen]:
+                button.configure(state="normal", text=self._button_labels[button])
+            if hasattr(self, "_stop_button") and self._stop_button is not None:
+                self._stop_button.pack_forget()
+            self._append_output(screen, "\nOperação interrompida pelo usuário.\n")
+            # Esvazia as filas para não processar resultados antigos
+            try:
+                while True:
+                    self._result_queue.get_nowait()
+            except queue.Empty:
+                pass
+            try:
+                while True:
+                    self._command_result_queue.get_nowait()
+            except queue.Empty:
+                pass
 
     def _start_operation(
             self, label: str, sections: list[Section], screen: str = "computer"
@@ -570,6 +610,8 @@ class SystemInfoBase:
 
     def _run_sections(self, sections: list[Section]) -> None:
             for title, action in sections:
+                if self._stop_event.is_set():
+                    break
                 self._result_queue.put(("progress", title))
                 captured = StringIO()
                 with redirect_stdout(captured):
@@ -593,13 +635,18 @@ class SystemInfoBase:
                 message_type, payload = None, None
             if message_type == "progress" and payload:
                 if self._active_screen == "computer":
-                    progress_name = self._progress_name(payload)
-                    next_step = min(self._progress_current + 1, self._progress_total)
                     progress_label = self._progress_labels.get(self._active_screen)
                     if progress_label:
-                        progress_label.configure(
-                            text=f"Executando: {progress_name}... ({next_step}/{self._progress_total})"
-                        )
+                        # Mensagens customizadas (ex.: "Limpando... X arquivos")
+                        # são mostradas diretamente, sem o step/total.
+                        if "Limpando" in payload or "..." in payload:
+                            progress_label.configure(text=payload)
+                        else:
+                            progress_name = self._progress_name(payload)
+                            next_step = min(self._progress_current + 1, self._progress_total)
+                            progress_label.configure(
+                                text=f"Executando: {progress_name}... ({next_step}/{self._progress_total})"
+                            )
             elif message_type == "output" and payload:
                 self._pending_tool_output += payload
                 if self._active_screen == "computer":
@@ -703,12 +750,15 @@ class SystemInfoBase:
 
     def _set_command_busy(self, screen: str, label: str) -> None:
             self._command_busy = True
+            self._stop_event.clear()
             self._active_screen = screen
             self._statuses[screen].configure(text="Status: Executando...", fg=ACCENT_YELLOW)
             for button in self._buttons[screen]:
                 button.configure(state="disabled")
                 if self._button_labels[button] == label:
                     button.configure(text="Executando...")
+            if hasattr(self, "_stop_button") and self._stop_button is not None:
+                self._stop_button.pack(side="left", fill="x", expand=True, padx=(3, 0))
             self._append_output(screen, f"{label}\n")
 
     def _set_command_ready(self) -> None:

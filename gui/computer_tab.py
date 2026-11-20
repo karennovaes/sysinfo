@@ -43,7 +43,19 @@ class ComputerTabMixin:
             )
 
     def _clean_cache(self) -> None:
-            self._start_operation("Limpeza de Cache", [("LIMPEZA DE CACHE", display_temp_cleaner)])
+            """Limpa cache com contador em tempo real no rótulo de progresso."""
+            def _run_clean():
+                # O _run_sections captura stdout, então usamos o _result_queue
+                # diretamente para atualizar o rótulo de progresso da interface.
+                def _on_progress(count: int, mb: float) -> None:
+                    self._result_queue.put((
+                        "progress",
+                        f"Limpando... {count} arquivos, {mb:.1f} MB",
+                    ))
+
+                display_temp_cleaner(_on_progress)
+
+            self._start_operation("Limpeza de Cache", [("LIMPEZA DE CACHE", _run_clean)])
 
     def _sync_time(self) -> None:
             self._start_operation(
@@ -80,7 +92,7 @@ class ComputerTabMixin:
                 progress_frame.grid_remove()
 
             results_content = output_frame.master
-            monitor_frame = tk.Frame(results_content, bg=BG_WHITE)
+            monitor_frame = tk.Frame(results_content, bg=BG_CARD)
             monitor_frame.grid(row=1, column=0, sticky="nsew", padx=0, pady=0)
             results_content.grid_rowconfigure(1, weight=1)
             results_content.grid_columnconfigure(0, weight=1)

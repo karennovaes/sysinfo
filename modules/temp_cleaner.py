@@ -5,7 +5,7 @@ from __future__ import annotations
 import os
 import platform
 import shutil
-from typing import Any
+from typing import Any, Callable
 
 from modules.security import log_audit
 
@@ -41,7 +41,10 @@ def _directory_depth(path: str) -> int:
     return path.replace("\\", "/").rstrip("/").count("/")
 
 
-def _clean_directory(path: str) -> dict[str, Any]:
+ProgressCallback = Callable[[int, float], None]
+
+
+def _clean_directory(path: str, on_progress: ProgressCallback | None = None) -> dict[str, Any]:
     """Remove o conteúdo de ``path`` e retorna as estatísticas da operação.
 
     Os arquivos são tentados primeiro. Em seguida, as pastas descobertas são
@@ -92,6 +95,8 @@ def _clean_directory(path: str) -> dict[str, Any]:
 
         stats["arquivos_deletados"] += 1
         stats["espaco_liberado_mb"] += size / (1024 * 1024)
+        if on_progress is not None:
+            on_progress(stats["arquivos_deletados"], stats["espaco_liberado_mb"])
 
     directories.sort(key=_directory_depth, reverse=True)
     for directory in directories:
@@ -111,7 +116,7 @@ def _clean_directory(path: str) -> dict[str, Any]:
 
 
 def _clean_directory_preserving(
-    path: str, preserved_names: set[str]
+    path: str, preserved_names: set[str], on_progress: ProgressCallback | None = None
 ) -> dict[str, Any]:
     """Limpa ``path`` sem tocar nas subpastas listadas em ``preserved_names``.
 
@@ -161,6 +166,8 @@ def _clean_directory_preserving(
             continue
         stats["arquivos_deletados"] += 1
         stats["espaco_liberado_mb"] += size / (1024 * 1024)
+        if on_progress is not None:
+            on_progress(stats["arquivos_deletados"], stats["espaco_liberado_mb"])
 
     directories.sort(key=_directory_depth, reverse=True)
     for directory in directories:
@@ -178,7 +185,7 @@ def _clean_directory_preserving(
     return stats
 
 
-def clean_temp() -> dict[str, Any]:
+def clean_temp(on_progress: ProgressCallback | None = None) -> dict[str, Any]:
     """Limpa temporários e o cache do Anota AI e retorna estatísticas."""
     user_path = os.environ.get("TEMP", "")
     system_path = r"C:\Windows\Temp"
@@ -197,10 +204,10 @@ def clean_temp() -> dict[str, Any]:
     if platform.system() != "Windows":
         return result
 
-    result["temp_user"] = _clean_directory(user_path)
-    result["temp_system"] = _clean_directory(system_path)
+    result["temp_user"] = _clean_directory(user_path, on_progress)
+    result["temp_system"] = _clean_directory(system_path, on_progress)
     result["cache_anota"] = _clean_directory_preserving(
-        anota_cache_path, ANOTA_PRESERVED_DIRS
+        anota_cache_path, ANOTA_PRESERVED_DIRS, on_progress
     )
     folders = (
         result["temp_user"],
@@ -220,9 +227,17 @@ def clean_temp() -> dict[str, Any]:
     return result
 
 
-def display_temp_cleaner() -> None:
-    """Exibe o total da limpeza e um resumo curto por local."""
-    result = clean_temp()
+def display_temp_cleaner(on_progress: ProgressCallback | None = None) -> None:
+    """Exibe o total da limpeza e um resumo curto por local.
+
+    Se ``on_progress`` for fornecido, é chamado a cada arquivo removido com
+    (contador, mb_liberados), permitindo feedback em tempo real na interface.
+    """
+    # Fase 1: descobrir quantos arquivos existem
+    if on_progress is not None:
+        on_progress(0, 0.0)
+
+    result = clean_temp(on_progress)
     log_audit(
         "temp_clean",
         f"Deletados: {result['total_deletado']}, "
