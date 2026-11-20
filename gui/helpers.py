@@ -162,6 +162,7 @@ class SystemInfoBase:
         self._command_busy = False
         self._stop_event = threading.Event()
         self._operation_gen = 0
+        self._current_gen = 0
         self._stop_buttons: dict[str, object] = {}
         self._card_queue: queue.Queue = queue.Queue()
         self._card_busy = False
@@ -603,6 +604,7 @@ class SystemInfoBase:
             stop_btn = self._stop_buttons.get(screen)
             if stop_btn is not None:
                 stop_btn.pack_forget()
+            self._pending_tool_output = ""
             self._append_output(screen, "\nOperação interrompida pelo usuário.\n")
             # Esvazia as filas para não processar resultados antigos
             try:
@@ -636,6 +638,7 @@ class SystemInfoBase:
             except queue.Empty:
                 pass
             self._set_tool_busy(screen, label)
+            self._current_gen = gen
             self._pending_tool_output = ""
             if screen == "computer":
                 progress_name = label if len(sections) > 1 else self._progress_name(sections[0][0])
@@ -653,31 +656,38 @@ class SystemInfoBase:
             for title, action in sections:
                 if self._stop_event.is_set() or gen != self._operation_gen:
                     break
-                self._result_queue.put(("progress", title))
+                self._result_queue.put(("progress", title, gen))
                 captured = StringIO()
                 with redirect_stdout(captured):
                     try:
                         action()
                     except Exception as exc:  # pragma: no cover - proteção da thread
                         print(f"Não foi possível concluir esta seção: {exc}")
-                # Só coloca o resultado se NÃO foi parado e é a geração atual.
                 if not self._stop_event.is_set() and gen == self._operation_gen:
                     self._result_queue.put(
                         (
                             "output",
                             f"\n{'=' * 59}\n{title}\n{'=' * 59}\n"
                             f"{captured.getvalue()}\n{'-' * 59}\n",
+                            gen,
                         )
                     )
-            # Só sinaliza done se não foi parado e é a geração atual.
             if not self._stop_event.is_set() and gen == self._operation_gen:
-                self._result_queue.put(("done", None))
+                self._result_queue.put(("done", None, gen))
 
     def _process_queue(self) -> None:
             try:
-                message_type, payload = self._result_queue.get_nowait()
+                msg = self._result_queue.get_nowait()
+                message_type = msg[0] if len(msg) > 0 else None
+                payload = msg[1] if len(msg) > 1 else None
+                msg_gen = msg[2] if len(msg) > 2 else None
             except queue.Empty:
-                message_type, payload = None, None
+                message_type, payload, msg_gen = None, None, None
+            # Descarta mensagens de gerações antigas (teste cancelado)
+            if msg_gen is not None and msg_gen != self._operation_gen:
+                if self._busy and not self._stop_event.is_set():
+                    self.root.after(50, self._process_queue)
+                return
             if message_type == "progress" and payload:
                 if self._active_screen == "computer":
                     progress_label = self._progress_labels.get(self._active_screen)
@@ -834,6 +844,7 @@ class SystemInfoBase:
             except queue.Empty:
                 pass
             self._set_command_busy(screen, label)
+            self._current_gen = gen
             worker = threading.Thread(
                 target=self._run_command_action,
                 args=(action, gen),
@@ -848,21 +859,27 @@ class SystemInfoBase:
                 action()
             except Exception as exc:  # pragma: no cover - proteção da thread
                 if not self._stop_event.is_set() and gen == self._operation_gen:
-                    self._command_result_queue.put(("output", f"Erro: {exc}\n"))
+                    self._command_result_queue.put(("output", f"Erro: {exc}\n", gen))
             finally:
                 if not self._stop_event.is_set() and gen == self._operation_gen:
-                    self._command_result_queue.put(("done", None))
+                    self._command_result_queue.put(("done", None, gen))
 
-    def _queue_command_output(self, text: str) -> None:
-            self._command_result_queue.put(("output", f"{text}\n"))
+    def _queue_command_output(self, text: str, gen: int | None = None) -> None:
+            self._command_result_queue.put(("output", f"{text}\n", gen))
 
     def _process_command_queue(self) -> None:
             finished = False
             while True:
                 try:
-                    message_type, payload = self._command_result_queue.get_nowait()
+                    msg = self._command_result_queue.get_nowait()
+                    message_type = msg[0] if len(msg) > 0 else None
+                    payload = msg[1] if len(msg) > 1 else None
+                    msg_gen = msg[2] if len(msg) > 2 else None
                 except queue.Empty:
                     break
+                # Descarta mensagens de gerações antigas
+                if msg_gen is not None and msg_gen != self._operation_gen:
+                    continue
                 if message_type == "output" and payload:
                     self._append_command_output(payload)
                 elif message_type == "progress_start":
@@ -915,12 +932,14 @@ class SystemInfoBase:
             elif self._command_busy and self._stop_event.is_set():
                 pass
 
-    def _queue_command_output_capture(self, action: Action) -> None:
+    def _queue_command_output_capture(self, action: Action, gen: int | None = None) -> None:
             """Captura funções de diagnóstico que imprimem na saída padrão."""
+            if gen is None:
+                gen = getattr(self, "_current_gen", None)
             captured = StringIO()
             with redirect_stdout(captured):
                 action()
-            self._queue_command_output(captured.getvalue())
+            self._queue_command_output(captured.getvalue(), gen)
 
     def _generate_report(self) -> None:
             """Gera o relatório da sessão e copia para a área de transferência."""
@@ -1004,7 +1023,7 @@ class SystemInfoBase:
                 log_audit("download_failed", f"Erro: {error}")
                 self._queue_command_output(f"Erro ao baixar: {error}")
                 return
-            self._command_result_queue.put(("progress_start", None))
+            self._command_result_queue.put(("progress_start", None, self._operation_gen))
 
             def reporthook(block_number: int, block_size: int, total_size: int) -> None:
                 downloaded = block_number * block_size
@@ -1030,10 +1049,10 @@ class SystemInfoBase:
                 sha256 = calculate_sha256(destination)
             except Exception as error:
                 log_audit("download_failed", f"Erro: {error}")
-                self._command_result_queue.put(("progress_done", None))
+                self._command_result_queue.put(("progress_done", None, self._operation_gen))
                 self._queue_command_output(f"Erro ao baixar: {error}")
                 return
-            self._command_result_queue.put(("progress_done", None))
+            self._command_result_queue.put(("progress_done", None, self._operation_gen))
             log_audit("download_complete", f"Arquivo: {destination}, SHA-256: {sha256}")
             self._queue_command_output(f"Download concluído: {destination}")
             self._queue_command_output(f"SHA-256: {sha256}")
