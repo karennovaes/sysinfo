@@ -820,6 +820,11 @@ class SystemInfoBase:
             stop_btn = self._stop_buttons.get(screen)
             if stop_btn is not None:
                 stop_btn.pack(side="right", padx=(0, 18))
+            # Limpa o terminal antes de iniciar um novo comando
+            output = self._outputs[screen]
+            output.configure(state="normal")
+            output.delete("1.0", "end")
+            output.configure(state="disabled")
             self._append_output(screen, f"{label}\n")
 
     def _set_command_ready(self) -> None:
