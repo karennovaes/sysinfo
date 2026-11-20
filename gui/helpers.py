@@ -623,9 +623,9 @@ class SystemInfoBase:
         ) -> None:
             if self._busy or self._command_busy or self._scan_busy:
                 return
-            self._stop_event.clear()
             self._operation_gen += 1
             gen = self._operation_gen
+            self._stop_event.clear()
             # Esvazia filas de resultados anteriores para não misturar.
             try:
                 while True:
@@ -830,9 +830,9 @@ class SystemInfoBase:
     def _start_command_thread(self, screen: str, label: str, action: Action) -> None:
             if self._busy or self._command_busy or self._scan_busy:
                 return
-            self._stop_event.clear()
             self._operation_gen += 1
             gen = self._operation_gen
+            self._stop_event.clear()
             try:
                 while True:
                     self._result_queue.get_nowait()
