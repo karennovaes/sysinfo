@@ -161,6 +161,7 @@ class SystemInfoBase:
         self._busy = False
         self._command_busy = False
         self._stop_event = threading.Event()
+        self._operation_gen = 0
         self._stop_buttons: dict[str, object] = {}
         self._card_queue: queue.Queue = queue.Queue()
         self._card_busy = False
@@ -621,6 +622,8 @@ class SystemInfoBase:
             if self._busy or self._command_busy or self._scan_busy:
                 return
             self._stop_event.clear()
+            self._operation_gen += 1
+            gen = self._operation_gen
             # Esvazia filas de resultados anteriores para não misturar.
             try:
                 while True:
@@ -639,16 +642,16 @@ class SystemInfoBase:
                 self._show_progress(progress_name, len(sections))
             worker = threading.Thread(
                 target=self._run_sections,
-                args=(sections,),
+                args=(sections, gen),
                 daemon=True,
                 name="sysinfo-diagnostics",
             )
             worker.start()
             self.root.after(50, self._process_queue)
 
-    def _run_sections(self, sections: list[Section]) -> None:
+    def _run_sections(self, sections: list[Section], gen: int = 0) -> None:
             for title, action in sections:
-                if self._stop_event.is_set():
+                if self._stop_event.is_set() or gen != self._operation_gen:
                     break
                 self._result_queue.put(("progress", title))
                 captured = StringIO()
@@ -657,8 +660,8 @@ class SystemInfoBase:
                         action()
                     except Exception as exc:  # pragma: no cover - proteção da thread
                         print(f"Não foi possível concluir esta seção: {exc}")
-                # Só coloca o resultado se NÃO foi parado.
-                if not self._stop_event.is_set():
+                # Só coloca o resultado se NÃO foi parado e é a geração atual.
+                if not self._stop_event.is_set() and gen == self._operation_gen:
                     self._result_queue.put(
                         (
                             "output",
@@ -666,8 +669,8 @@ class SystemInfoBase:
                             f"{captured.getvalue()}\n{'-' * 59}\n",
                         )
                     )
-            # Só sinaliza done se não foi parado.
-            if not self._stop_event.is_set():
+            # Só sinaliza done se não foi parado e é a geração atual.
+            if not self._stop_event.is_set() and gen == self._operation_gen:
                 self._result_queue.put(("done", None))
 
     def _process_queue(self) -> None:
@@ -818,6 +821,8 @@ class SystemInfoBase:
             if self._busy or self._command_busy or self._scan_busy:
                 return
             self._stop_event.clear()
+            self._operation_gen += 1
+            gen = self._operation_gen
             try:
                 while True:
                     self._result_queue.get_nowait()
@@ -831,21 +836,21 @@ class SystemInfoBase:
             self._set_command_busy(screen, label)
             worker = threading.Thread(
                 target=self._run_command_action,
-                args=(action,),
+                args=(action, gen),
                 daemon=True,
                 name="sysinfo-command",
             )
             worker.start()
             self.root.after(50, self._process_command_queue)
 
-    def _run_command_action(self, action: Action) -> None:
+    def _run_command_action(self, action: Action, gen: int = 0) -> None:
             try:
                 action()
             except Exception as exc:  # pragma: no cover - proteção da thread
-                if not self._stop_event.is_set():
+                if not self._stop_event.is_set() and gen == self._operation_gen:
                     self._command_result_queue.put(("output", f"Erro: {exc}\n"))
             finally:
-                if not self._stop_event.is_set():
+                if not self._stop_event.is_set() and gen == self._operation_gen:
                     self._command_result_queue.put(("done", None))
 
     def _queue_command_output(self, text: str) -> None:
