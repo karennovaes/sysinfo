@@ -161,7 +161,7 @@ class SystemInfoBase:
         self._busy = False
         self._command_busy = False
         self._stop_event = threading.Event()
-        self._stop_buttons: dict[str, ttk.Button] = {}
+        self._stop_buttons: dict[str, object] = {}
         self._card_queue: queue.Queue = queue.Queue()
         self._card_busy = False
         self._active_screen = ""
@@ -185,8 +185,7 @@ class SystemInfoBase:
             header.pack(fill="x")
             header.pack_propagate(False)
 
-            # Botão do relatório à direita (criado antes do título para que o
-            # pack reserve o espaço à direita e o título ocupe o restante).
+            # Botão do relatório à direita (tela inicial apenas).
             if title_text == WINDOW_TITLE:
                 self._report_button = tk.Button(
                     header,
@@ -204,6 +203,36 @@ class SystemInfoBase:
                     cursor="hand2",
                 )
                 self._report_button.pack(side="right", padx=(0, 18))
+
+            # Botão Parar à direita (todas as telas exceto a inicial).
+            # Começa oculto; só aparece quando um diagnóstico está rodando.
+            if title_text != WINDOW_TITLE:
+                # Deriva a chave da tela a partir do título.
+                _title_to_screen = {
+                    "computador": "computer",
+                    "programa": "program",
+                    "rede": "network",
+                    "impressora": "printer",
+                }
+                screen_key = _title_to_screen.get(
+                    title_text.split(" ")[0].casefold(), ""
+                )
+                stop_btn = tk.Button(
+                    header,
+                    text="Parar",
+                    command=self._stop_operation,
+                    bg=BG_WHITE,
+                    fg=ACCENT_RED,
+                    activebackground=PRIMARY_LIGHT,
+                    activeforeground=ACCENT_RED,
+                    font=FONT_BUTTON_BOLD,
+                    relief="flat",
+                    borderwidth=0,
+                    padx=16,
+                    pady=6,
+                    cursor="hand2",
+                )
+                self._stop_buttons[screen_key] = stop_btn
 
             tk.Label(
                 header,
@@ -323,12 +352,6 @@ class SystemInfoBase:
                 clear_button.pack(side="left", fill="x", expand=True, padx=(0, 3))
                 self._buttons[screen].append(clear_button)
                 self._button_labels[clear_button] = "Limpar"
-                # Botão Parar: só aparece durante execução.
-                # Um por tela, guardado num dict.
-                stop_btn = self._make_button(
-                    footer, "Parar", self._stop_operation
-                )
-                self._stop_buttons[screen] = stop_btn
             back_button = self._make_button(footer, "Voltar", self._back_to_initial)
             back_button.pack(
                 side="left" if with_progress else "top", fill="x", expand=with_progress
@@ -553,7 +576,7 @@ class SystemInfoBase:
             # Mostra o botão Parar da tela atual
             stop_btn = self._stop_buttons.get(screen)
             if stop_btn is not None:
-                stop_btn.pack(side="left", fill="x", expand=True, padx=(3, 0))
+                stop_btn.pack(side="right", padx=(0, 18))
 
     def _set_tool_ready(self) -> None:
             screen = self._active_screen
@@ -597,6 +620,18 @@ class SystemInfoBase:
         ) -> None:
             if self._busy or self._command_busy or self._scan_busy:
                 return
+            self._stop_event.clear()
+            # Esvazia filas de resultados anteriores para não misturar.
+            try:
+                while True:
+                    self._result_queue.get_nowait()
+            except queue.Empty:
+                pass
+            try:
+                while True:
+                    self._command_result_queue.get_nowait()
+            except queue.Empty:
+                pass
             self._set_tool_busy(screen, label)
             self._pending_tool_output = ""
             if screen == "computer":
@@ -622,14 +657,18 @@ class SystemInfoBase:
                         action()
                     except Exception as exc:  # pragma: no cover - proteção da thread
                         print(f"Não foi possível concluir esta seção: {exc}")
-                self._result_queue.put(
-                    (
-                        "output",
-                        f"\n{'=' * 59}\n{title}\n{'=' * 59}\n"
-                        f"{captured.getvalue()}\n{'-' * 59}\n",
+                # Só coloca o resultado se NÃO foi parado.
+                if not self._stop_event.is_set():
+                    self._result_queue.put(
+                        (
+                            "output",
+                            f"\n{'=' * 59}\n{title}\n{'=' * 59}\n"
+                            f"{captured.getvalue()}\n{'-' * 59}\n",
+                        )
                     )
-                )
-            self._result_queue.put(("done", None))
+            # Só sinaliza done se não foi parado.
+            if not self._stop_event.is_set():
+                self._result_queue.put(("done", None))
 
     def _process_queue(self) -> None:
             try:
@@ -765,7 +804,7 @@ class SystemInfoBase:
                     button.configure(text="Executando...")
             stop_btn = self._stop_buttons.get(screen)
             if stop_btn is not None:
-                stop_btn.pack(side="left", fill="x", expand=True, padx=(3, 0))
+                stop_btn.pack(side="right", padx=(0, 18))
             self._append_output(screen, f"{label}\n")
 
     def _set_command_ready(self) -> None:
@@ -778,6 +817,17 @@ class SystemInfoBase:
     def _start_command_thread(self, screen: str, label: str, action: Action) -> None:
             if self._busy or self._command_busy or self._scan_busy:
                 return
+            self._stop_event.clear()
+            try:
+                while True:
+                    self._result_queue.get_nowait()
+            except queue.Empty:
+                pass
+            try:
+                while True:
+                    self._command_result_queue.get_nowait()
+            except queue.Empty:
+                pass
             self._set_command_busy(screen, label)
             worker = threading.Thread(
                 target=self._run_command_action,
@@ -792,11 +842,10 @@ class SystemInfoBase:
             try:
                 action()
             except Exception as exc:  # pragma: no cover - proteção da thread
-                self._command_result_queue.put(("output", f"Erro: {exc}\n"))
+                if not self._stop_event.is_set():
+                    self._command_result_queue.put(("output", f"Erro: {exc}\n"))
             finally:
                 if not self._stop_event.is_set():
-                    self._command_result_queue.put(("done", None))
-                else:
                     self._command_result_queue.put(("done", None))
 
     def _queue_command_output(self, text: str) -> None:
