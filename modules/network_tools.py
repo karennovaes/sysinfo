@@ -33,6 +33,7 @@ def _run(command: list[str], timeout: int = 30) -> subprocess.CompletedProcess[s
             command,
             capture_output=True,
             text=True,
+            encoding="cp850",
             timeout=timeout,
             check=False,
             creationflags=_creation_flags(),

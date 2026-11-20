@@ -39,6 +39,7 @@ def _run_ps(command: str) -> str:
             ["powershell", "-NoProfile", "-NonInteractive", "-Command", command],
             capture_output=True,
             text=True,
+            encoding="cp850",
             timeout=15,
             check=False,
             creationflags=_creation_flags(),

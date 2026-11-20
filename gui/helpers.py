@@ -80,13 +80,25 @@ def _run_command_capture(command: list[str]) -> str:
         result = subprocess.run(
             command,
             capture_output=True,
-            text=True,
             timeout=30,
             check=False,
             creationflags=_creation_flags(),
             startupinfo=_startup_info(),
         )
-        output = (result.stdout or "") + (result.stderr or "")
+        # O Windows em PT-BR usa codepage 850 (DOS) ou 1252 (ANSI) para a
+        # saída de comandos como ipconfig e netsh. Decodificamos com fallback.
+        raw = (result.stdout or b"") + (result.stderr or b"")
+        for encoding in ("cp850", "cp1252", "utf-8", "latin-1"):
+            try:
+                output = raw.decode(encoding)
+                # Heuristica: se decodificou sem erro e tem caracteres
+                # acentuados validos, usa essa codificacao.
+                if "ã" in output or "ç" in output or "ê" in output or "á" in output:
+                    break
+            except (UnicodeDecodeError, LookupError):
+                continue
+        else:
+            output = raw.decode("utf-8", errors="replace")
         return output.strip() or "Comando executado sem saída."
     except Exception as exc:
         return f"Erro ao executar: {exc}"
@@ -107,7 +119,6 @@ def _clear_print_queue() -> str:
                 result = subprocess.run(
                     cmd,
                     capture_output=True,
-                    text=True,
                     timeout=15,
                     check=False,
                     creationflags=_creation_flags(),
@@ -117,14 +128,26 @@ def _clear_print_queue() -> str:
                 result = subprocess.run(
                     command,
                     capture_output=True,
-                    text=True,
                     timeout=15,
                     check=False,
                     creationflags=_creation_flags(),
                     startupinfo=_startup_info(),
                 )
             output_lines.append(f"> {' '.join(command)}")
-            output_lines.append((result.stdout or result.stderr or "OK").strip())
+            raw = result.stdout or result.stderr or b"OK"
+            if isinstance(raw, bytes):
+                for enc in ("cp850", "cp1252", "utf-8", "latin-1"):
+                    try:
+                        decoded = raw.decode(enc)
+                        if any(c in decoded for c in "ãçêáéíóúâô"):
+                            break
+                    except (UnicodeDecodeError, LookupError):
+                        continue
+                else:
+                    decoded = raw.decode("utf-8", errors="replace")
+            else:
+                decoded = str(raw)
+            output_lines.append(decoded.strip())
         except Exception as exc:
             output_lines.append(f"> {' '.join(command)}")
             output_lines.append(f"Erro ao executar: {exc}")
@@ -669,8 +692,8 @@ class SystemInfoBase:
                     self._result_queue.put(
                         (
                             "output",
-                            f"\n{'=' * 59}\n{title}\n{'=' * 59}\n"
-                            f"{captured.getvalue()}\n{'-' * 59}\n",
+                            f"\n{'=' * 57}\n{title}\n{'=' * 57}\n"
+                            f"{captured.getvalue()}\n{'-' * 57}\n",
                             gen,
                         )
                     )
@@ -828,7 +851,7 @@ class SystemInfoBase:
             # Cabeçalho no mesmo formato da aba Computador
             self._append_output(
                 screen,
-                f"\n{'=' * 59}\n{label.upper()}\n{'=' * 59}\n\n",
+                f"\n{'=' * 57}\n{label.upper()}\n{'=' * 57}\n\n",
             )
 
     def _set_command_ready(self) -> None:
