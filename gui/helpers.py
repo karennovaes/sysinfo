@@ -692,8 +692,8 @@ class SystemInfoBase:
                     self._result_queue.put(
                         (
                             "output",
-                            f"\n{'=' * 57}\n{title}\n{'=' * 57}\n"
-                            f"{captured.getvalue()}\n{'-' * 57}\n",
+                            f"\n{'=' * 59}\n{title}\n{'=' * 59}\n"
+                            f"{captured.getvalue()}\n{'-' * 59}\n",
                             gen,
                         )
                     )
@@ -701,55 +701,71 @@ class SystemInfoBase:
                 self._result_queue.put(("done", None, gen))
 
     def _process_queue(self) -> None:
-            try:
-                msg = self._result_queue.get_nowait()
+            """Drena todas as mensagens pendentes de uma só vez.
+
+            Antes o método processava uma mensagem por ciclo (50 ms).  Quando
+            um diagnóstico emitia milhares de mensagens de progresso — como a
+            limpeza de cache com muitos arquivos — a mensagem "done" ficava
+            presa no fundo da fila e a operação parecia nunca terminar.
+
+            Agora todo o backlog é consumido num único passe: progressos
+            intermediários são descartados (só o último é exibido) e a barra
+            avança de uma vez para a posição final.
+            """
+            latest_progress: str | None = None
+            finished = False
+            while True:
+                try:
+                    msg = self._result_queue.get_nowait()
+                except queue.Empty:
+                    break
                 message_type = msg[0] if len(msg) > 0 else None
                 payload = msg[1] if len(msg) > 1 else None
                 msg_gen = msg[2] if len(msg) > 2 else None
-            except queue.Empty:
-                message_type, payload, msg_gen = None, None, None
-            # Descarta mensagens de gerações antigas (teste cancelado)
-            if msg_gen is not None and msg_gen != self._operation_gen:
-                if self._busy and not self._stop_event.is_set():
-                    self.root.after(50, self._process_queue)
-                return
-            if message_type == "progress" and payload:
-                if self._active_screen == "computer":
-                    progress_label = self._progress_labels.get(self._active_screen)
-                    if progress_label:
-                        # Mensagens customizadas (ex.: "Limpando... X arquivos")
-                        # são mostradas diretamente, sem o step/total.
-                        if "Limpando" in payload or "..." in payload:
-                            progress_label.configure(text=payload)
-                        else:
-                            progress_name = self._progress_name(payload)
-                            next_step = min(self._progress_current + 1, self._progress_total)
-                            progress_label.configure(
-                                text=f"Executando: {progress_name}... ({next_step}/{self._progress_total})"
-                            )
-            elif message_type == "output" and payload:
-                self._pending_tool_output += payload
-                if self._active_screen == "computer":
-                    self._progress_current = min(self._progress_current + 1, self._progress_total)
-                    progress_bar = self._progress_bars.get(self._active_screen)
-                    if progress_bar:
-                        progress_bar.configure(
-                            mode="determinate",
-                            maximum=self._progress_total,
-                            value=self._progress_current,
+                # Descarta mensagens de gerações antigas (teste cancelado)
+                if msg_gen is not None and msg_gen != self._operation_gen:
+                    continue
+                if message_type == "progress" and payload:
+                    latest_progress = payload
+                elif message_type == "output" and payload:
+                    self._pending_tool_output += payload
+                    if self._active_screen == "computer":
+                        self._progress_current = min(
+                            self._progress_current + 1, self._progress_total
                         )
-            elif message_type == "done":
+                elif message_type == "done":
+                    finished = True
+
+            # Aplica o progresso mais recente (descarta intermediários)
+            if latest_progress is not None and self._active_screen == "computer":
+                progress_label = self._progress_labels.get(self._active_screen)
+                if progress_label:
+                    if "Limpando" in latest_progress or "..." in latest_progress:
+                        progress_label.configure(text=latest_progress)
+                    else:
+                        progress_name = self._progress_name(latest_progress)
+                        next_step = min(self._progress_current + 1, self._progress_total)
+                        progress_label.configure(
+                            text=f"Executando: {progress_name}... ({next_step}/{self._progress_total})"
+                        )
+                progress_bar = self._progress_bars.get(self._active_screen)
+                if progress_bar:
+                    progress_bar.configure(
+                        mode="determinate",
+                        maximum=self._progress_total,
+                        value=self._progress_current,
+                    )
+
+            if finished:
                 self._append_output(self._active_screen, self._pending_tool_output)
                 self._session_output += self._pending_tool_output
                 if self._active_screen == "computer":
                     self._hide_progress()
                 self._set_tool_ready()
                 return
+
             if self._busy and not self._stop_event.is_set():
                 self.root.after(50, self._process_queue)
-            elif self._busy and self._stop_event.is_set():
-                # O stop já liberou os botões; apenas não reagenda.
-                pass
 
     def _show_cards_async(
             self,
@@ -851,7 +867,7 @@ class SystemInfoBase:
             # Cabeçalho no mesmo formato da aba Computador
             self._append_output(
                 screen,
-                f"\n{'=' * 57}\n{label.upper()}\n{'=' * 57}\n\n",
+                f"\n{'=' * 59}\n{label.upper()}\n{'=' * 59}\n\n",
             )
 
     def _set_command_ready(self) -> None:
