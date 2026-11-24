@@ -100,10 +100,14 @@ def _clean_directory(
 
         stats["arquivos_deletados"] += 1
         stats["espaco_liberado_mb"] += size / (1024 * 1024)
-        if on_progress is not None:
+        if on_progress is not None and stats["arquivos_deletados"] % 100 == 0:
             on_progress(stats["arquivos_deletados"], stats["espaco_liberado_mb"])
         if should_stop is not None and should_stop():
             break
+
+    # Progresso final desta pasta (garante o contador total mesmo se < 100)
+    if on_progress is not None:
+        on_progress(stats["arquivos_deletados"], stats["espaco_liberado_mb"])
 
     if should_stop is not None and should_stop():
         stats["espaco_liberado_mb"] = round(stats["espaco_liberado_mb"], 2)
@@ -189,10 +193,14 @@ def _clean_directory_preserving(
             continue
         stats["arquivos_deletados"] += 1
         stats["espaco_liberado_mb"] += size / (1024 * 1024)
-        if on_progress is not None:
+        if on_progress is not None and stats["arquivos_deletados"] % 100 == 0:
             on_progress(stats["arquivos_deletados"], stats["espaco_liberado_mb"])
         if should_stop is not None and should_stop():
             break
+
+    # Progresso final desta pasta (garante o contador total mesmo se < 100)
+    if on_progress is not None:
+        on_progress(stats["arquivos_deletados"], stats["espaco_liberado_mb"])
 
     if should_stop is not None and should_stop():
         stats["espaco_liberado_mb"] = round(stats["espaco_liberado_mb"], 2)
